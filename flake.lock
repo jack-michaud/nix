@@ -1,12 +1,32 @@
 {
   "nodes": {
+    "dwm": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1619411861,
+        "narHash": "sha256-g2J/GUzRfuesTPwkGdPaZozn5CZsqS7QQo3wWA1cqw4=",
+        "owner": "jack-michaud",
+        "repo": "dwm",
+        "rev": "8a17fddc8e02b6f4fb3078f938f2af4dad3adb47",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jack-michaud",
+        "repo": "dwm",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1618258464,
-        "narHash": "sha256-pOnRc1lXouE8MTRB2M7TuQrcqWIPJV/iunc7FL4EIEo=",
+        "lastModified": 1619262110,
+        "narHash": "sha256-XjmRXOlmmkP9dwOqe3/L0egX+G17zCN2k3lkhEXtRJ4=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "cce26cd83d20356ee96ac9cf1de748e87fcc50b5",
+        "rev": "e6911eaed6bb61acf11f9ae106d58b7d8fcfd659",
         "type": "github"
       },
       "original": {
@@ -16,9 +36,27 @@
         "type": "github"
       }
     },
+    "nixpkgs-git": {
+      "locked": {
+        "lastModified": 1619412638,
+        "narHash": "sha256-lLghVzQDsvIRCR2PLy/tLmHoPT5vSgyNyKYjsXeHNE4=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "abc021b6162f065eb8bfd093f0f0e105b5885152",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "master",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "dwm": "dwm",
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-git": "nixpkgs-git"
       }
     }
   },

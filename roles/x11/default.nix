@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, ... }:
+{ lib, config, pkgs, options, dwm, ... }:
 {
 
   # Enable the X11 windowing system.
@@ -6,10 +6,12 @@
   # Configure keymap in X11
   services.xserver.layout = "us";
 
-  services.xserver.windowManager.i3 = {
-    enable = true;
-    package = pkgs.i3-gaps;
-  };
+  services.xserver.displayManager.lightdm.enable = true;
+  services.xserver.windowManager.dwm.enable = true;
+  #services.xserver.windowManager.i3 = {
+  #  enable = true;
+  #  package = pkgs.i3-gaps;
+  #};
 
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
