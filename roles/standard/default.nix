@@ -1,7 +1,7 @@
-{ lib, config, pkgs, options, ... }:
+{ hostMetadata, lib, config, pkgs, options, ... }:
 {
   imports = [
-    ../cachix
+    ./cachix
   ];
 
   boot.loader.systemd-boot.enable = true;
