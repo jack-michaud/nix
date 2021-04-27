@@ -1,7 +1,8 @@
-{ hostMetadata, lib, config, pkgs, options, ... }:
+{ lib, config, pkgs, options, ... }:
 {
   imports = [
     ./cachix
+    ./alacritty.nix
   ];
 
   boot.loader.systemd-boot.enable = true;
@@ -22,7 +23,6 @@
   # $ nix search wget
   environment.systemPackages = with pkgs; [
     wget vim
-    alacritty
     firefox
     discord
     git
