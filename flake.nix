@@ -2,12 +2,16 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-20.09";
     nixpkgs-git.url = "github:NixOS/nixpkgs/master";
+    home-manager = {
+      url = "github:nix-community/home-manager/release-20.09";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     dwm = {
       url = "github:jack-michaud/dwm";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
-  outputs = { self, nixpkgs, nixpkgs-git, dwm }:
+  outputs = { self, nixpkgs, nixpkgs-git, dwm, home-manager }:
     let 
       mkOverlay = system: import ./overlays {
         inherit system;
@@ -42,6 +46,8 @@
                 nixpkgs.config.allowUnfree = true;
                 nix.registry.nixpkgs.flake = nixpkgs;
               }
+              home-manager.nixosModules.home-manager 
+              { home-manager.useGlobalPkgs = true; }
               (import (./hosts + "/${name}/default.nix"))
               (import (./hosts + "/${name}/hardware-configuration.nix"))
             ];
