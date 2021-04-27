@@ -13,6 +13,10 @@
   #  package = pkgs.i3-gaps;
   #};
 
+  fonts.fonts = [
+    pkgs.font-awesome_5
+  ];
+
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
 }
