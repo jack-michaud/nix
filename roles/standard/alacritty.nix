@@ -1,8 +1,8 @@
 { lib, config, pkgs, options, ... }:
 {
-  fonts.fonts = [
-    (pkgs.callPackage ./iosevka.nix {})
-  ];
+  #fonts.fonts = [
+  #  (pkgs.callPackage ./iosevka.nix {})
+  #];
 
   home-manager.users.jack.programs.alacritty = {
     enable = true;
@@ -16,10 +16,10 @@
           y = 10;
         };
       };
-      font = {
-        normal.family = "Iosevka Fixed";
-        size = 11.0;
-      };
+      #font = {
+      #  normal.family = "Iosevka Fixed";
+      #  size = 11.0;
+      #};
       colors = {
         primary = {
           background = "#272822";
