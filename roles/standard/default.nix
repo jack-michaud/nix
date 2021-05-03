@@ -2,7 +2,9 @@
 {
   imports = [
     ./cachix
+    ./neovim
     ./alacritty.nix
+    ./git.nix
   ];
 
   boot.loader.systemd-boot.enable = true;
@@ -23,9 +25,11 @@
   # $ nix search wget
   environment.systemPackages = with pkgs; [
     wget vim
+    ripgrep
     firefox
     discord
     git
+    ranger
   ];
 
   nix = {
