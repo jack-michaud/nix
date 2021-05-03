@@ -2,6 +2,8 @@
 let
   plugins = with pkgs.vimPlugins; [
     vim-fugitive
+    vim-dispatch
+    vim-sneak
     vim-nix
     fzf-vim
     coc-nvim
