@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, ... }:
+{ lib, config, pkgs, options, home-manager, ... }:
 {
   #fonts.fonts = [
   #  (pkgs.callPackage ./iosevka.nix {})
