@@ -7,7 +7,7 @@
     "  - Press "=" on an file (shows git diff)
     "  - Press "-" on a hunk or visual selection to stage/unstage
     "  - "cvc" to commit verbosely
-    noremap <leader>gs  :Gstatus<Enter>
+    noremap <leader>gs  :Git<Enter>
     noremap <leader>gl  :Glog<Enter>
   '';
 }
