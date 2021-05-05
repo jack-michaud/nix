@@ -3,6 +3,7 @@
   imports = [
     ./rofi.nix
     ./sxhkd.nix
+    ./light.nix
   ];
 
   # Enable the X11 windowing system.
