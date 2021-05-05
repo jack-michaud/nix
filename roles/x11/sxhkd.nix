@@ -9,8 +9,8 @@
       "super + n" = "${pkgs.gnome3.networkmanagerapplet}/bin/nm-connection-editor";
 
       # Brightness
-      "F5" = "/run/current-system/sw/bin/light -A 10";
-      "F6" = "/run/current-system/sw/bin/light -U 10";
+      "F5" = "/run/current-system/sw/bin/light -U 5";
+      "F6" = "/run/current-system/sw/bin/light -A 5";
     };
   };
 
