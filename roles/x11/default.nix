@@ -23,8 +23,18 @@
 
   environment.systemPackages = with pkgs; [
     xclip
+    xbrightness
+    feh
   ];
 
+  services.xserver.displayManager.sessionCommands = ''
+    date > /tmp/date
+    ${pkgs.feh}/bin/feh --bg-scale --no-xinerama ~/Downloads/yz6ggt7m18l41.png
+    while true; do
+      ${(pkgs.callPackage ./dwm-status.nix {})}/bin/dwmStatus
+      sleep 3 &
+    done &
+  '';
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
 }
