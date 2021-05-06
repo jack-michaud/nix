@@ -35,6 +35,8 @@
     ranger
     vifm
     z-lua
+
+    obsidian
   ];
 
   nix = {
