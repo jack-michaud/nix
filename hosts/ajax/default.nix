@@ -3,7 +3,7 @@
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
-      ../../roles/standard
+      ../../roles/standard/linux.nix
       ../../roles/ssh
       ../../roles/x11
       ../../roles/sound
