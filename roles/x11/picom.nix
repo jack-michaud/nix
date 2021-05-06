@@ -1,6 +1,10 @@
-{ ... }:
+{ home-manager, ... }:
 {
   home-manager.users.jack.services.picom = {
+    enable = true;
+    opacityRule = [
+      "95:class_g = 'Alacritty'"
+    ];
     extraOptions = ''
       #################################
       #             Shadows           #
@@ -121,9 +125,6 @@
       #################################
       
       
-      # Opacity of inactive windows. (0.1 - 1.0, defaults to 1.0)
-      inactive-opacity = 1
-      # inactive-opacity = 0.8;
       
       # Opacity of window titlebars and borders. (0.1 - 1.0, disabled by default)
       # frame-opacity = 1.0
@@ -156,9 +157,6 @@
       # example:
       #    opacity-rule = [ "80:class_g = 'URxvt'" ];
       #
-      opacity-rule = [
-        "95:class_g = 'Alacritty'"
-      ]
       
       
       #################################
@@ -167,7 +165,7 @@
       
       
       # Parameters for background blurring, see the *BLUR* section for more information.
-      blur-method = "dual_kawase"
+      #blur-method = "dual_kawase"
       blur-size = 2
       #
       # blur-deviation = false
@@ -215,16 +213,6 @@
       # Daemonize process. Fork to background after initialization. Causes issues with certain (badly-written) drivers.
       # daemon = false
       
-      # Specify the backend to use: `xrender`, `glx`, or `xr_glx_hybrid`.
-      # `xrender` is the default one.
-      #
-      backend = "glx"
-      # backend = "xrender";
-      
-      # Enable/disable VSync.
-      # vsync = false
-      vsync = true
-      
       # Enable remote control via D-Bus. See the *D-BUS API* section below for more details.
       # dbus = false
       
@@ -259,7 +247,6 @@
       # try detecting this with X RandR extension.
       #
       # refresh-rate = 60
-      refresh-rate = 0
       
       # Limit picom to repaint at most once every 1 / 'refresh_rate' second to 
       # boost performance. This should not be used with 
@@ -427,14 +414,6 @@
       #     set, and doesn't want certain window to cause unnecessary screen redirection, 
       #     you can set this to `true`.
       #
-      wintypes:
-      {
-        tooltip = { fade = true; shadow = true; opacity = 0.75; focus = true; full-shadow = false; };
-        dock = { shadow = false; }
-        dnd = { shadow = false; }
-        popup_menu = { opacity = 0.8; }
-        dropdown_menu = { opacity = 0.8; }
-      };
     '';
   };
 }
