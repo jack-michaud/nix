@@ -25,6 +25,7 @@
     discord
     obsidian
     vifm
+    betterlockscreen
   ];
 
 }
