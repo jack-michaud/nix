@@ -1,7 +1,7 @@
-{ home-manager, pkgs, ... }:
+{ home-manager, pkgs, username, ... }:
 {
   
-  home-manager.users.jack.programs.rofi = {
+  home-manager.users."${username}".programs.rofi = {
     enable = true;
     # Theming was done in xresources
     extraConfig = {

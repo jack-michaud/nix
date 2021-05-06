@@ -1,6 +1,6 @@
-{ ... }:
+{ username, ... }:
 {
-  home-manager.users.jack.programs.git = {
+  home-manager.users."${username}".programs.git = {
     enable = true;
     userName = "Jack Michaud";
     userEmail = "jack@lomz.me";

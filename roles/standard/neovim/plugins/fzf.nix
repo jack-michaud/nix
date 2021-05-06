@@ -1,6 +1,6 @@
-{ ... }:
+{ username, ... }:
 {
-  home-manager.users.jack.programs.neovim.extraConfig = ''
+  home-manager.users."${username}".programs.neovim.extraConfig = ''
     nnoremap <leader>F :Files<enter>
     nnoremap <leader>G :Rg<enter>
     nnoremap <leader>b :Buffers<enter>

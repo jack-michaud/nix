@@ -1,6 +1,6 @@
-{ ... }:
+{ username, ... }:
 {
-  home-manager.users.jack.programs.neovim.extraConfig = ''
+  home-manager.users."${username}".programs.neovim.extraConfig = ''
     " Opens Git link for selected line or region in browser
     noremap <leader>gb  :Gbrowse<Enter>
     " Adding hunks with :Gstatus - https://vi.stackexchange.com/a/21410

@@ -28,6 +28,9 @@
         in {
           "${name}" = nixpkgs.lib.makeOverridable nixpkgs.lib.nixosSystem {
             inherit system;
+            specialArgs = {
+              username = "jack";
+            };
             modules = [ 
               {
                 nixpkgs.overlays = [ myoverlay ];

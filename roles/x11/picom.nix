@@ -1,6 +1,6 @@
-{ home-manager, ... }:
+{ home-manager, username, ... }:
 {
-  home-manager.users.jack.services.picom = {
+  home-manager.users."${username}".services.picom = {
     enable = true;
     opacityRule = [
       "95:class_g = 'Alacritty'"

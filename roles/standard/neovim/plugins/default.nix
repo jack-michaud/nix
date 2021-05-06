@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, username, ... }:
 let
   customPlugin = { repo, owner, rev, sha256 }:
   pkgs.vimUtils.buildVimPlugin {
@@ -29,5 +29,5 @@ in {
     ./fugitive.nix
     ./vifm.nix
   ];
-  home-manager.users.jack.programs.neovim.plugins = plugins;
+  home-manager.users."${username}".programs.neovim.plugins = plugins;
 }

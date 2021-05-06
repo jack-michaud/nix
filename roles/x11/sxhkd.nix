@@ -1,6 +1,6 @@
-{ home-manager, pkgs, utils, ... }:
+{ home-manager, pkgs, utils, username, ... }:
 {
-  home-manager.users.jack.services.sxhkd = {
+  home-manager.users."${username}".services.sxhkd = {
     enable = true;
 
     keybindings = {

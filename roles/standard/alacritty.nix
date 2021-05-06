@@ -1,10 +1,10 @@
-{ lib, config, pkgs, options, home-manager, ... }:
+{ lib, config, pkgs, options, home-manager, username, ... }:
 {
   fonts.fonts = [
     pkgs.iosevka
   ];
 
-  home-manager.users.jack.programs.alacritty = {
+  home-manager.users."${username}".programs.alacritty = {
     enable = true;
     settings = {
       env = {
