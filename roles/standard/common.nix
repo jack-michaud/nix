@@ -22,6 +22,8 @@
     ranger
     z-lua
     fish
+    github-cli
+    betterlockscreen
   ];
 
   nix = {
