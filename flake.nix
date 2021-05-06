@@ -10,8 +10,12 @@
       url = "github:jack-michaud/dwm";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # nix-darwin input
+    darwin.url = "github:lnl7/nix-darwin/master";
+    darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager }:
+  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin }:
     let 
       mkOverlay = system: import ./overlays {
         inherit system dwm;
@@ -50,5 +54,25 @@
       // (system-config "ajax" "x86_64-linux")
       ;
       overlay = mkOverlay "x86_64-linux";
+
+      darwinConfigurations = let 
+        darwin-system-config = name: username: system: 
+        {
+          "${name}" = darwin.lib.darwinSystem {
+            specialArgs = {
+              inherit username;
+            };
+            modules = [
+              home-manager.darwinModules.home-manager 
+              { 
+                home-manager.useGlobalPkgs = true;
+              }
+              (import (./hosts + "/${name}/configuration.nix"))
+            ];
+          };
+        };
+      in {}
+      // darwin-system-config "DAHDEE" "Jack" "x86_64-darwin"
+      ;
     };
 }
