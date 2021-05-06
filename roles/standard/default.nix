@@ -5,6 +5,7 @@
     ./neovim
     ./alacritty.nix
     ./git.nix
+    ./fish.nix
   ];
 
   boot.loader.systemd-boot.enable = true;
@@ -19,7 +20,9 @@
     openssh.authorizedKeys.keys = [
       "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAHXhwJc/cmSfds8ZZmFPVZC7j7mEV8fqnU+IKqAo5fqEDZSOZ2Th949rn3B3+iaZ3yxNog2151Yp8h5ivez3PmFOAGon3qjC9gcWcmxzjcytkZHdJaxOmpHmiuJj44UFq87tETmj+V8+hbyTGvtqTuB5aPhYmVCfApOnQSfbBY1uAnRgA== jack@CASTOR"
     ];
+    shell = pkgs.fish;
   };
+  environment.sessionVariables.EDITOR = "nvim";
 
   # List packages installed in system profile. To search, run:
   # $ nix search wget
@@ -35,9 +38,8 @@
   ];
 
   nix = {
-    package = pkgs.nixUnstable;
-    extraOptions = ''
-      experimental-features = nix-command flakes;
-    '';
+    package = pkgs.nixFlakes;
+    extraOptions = lib.optionalString (config.nix.package == pkgs.nixFlakes)
+    "experimental-features = nix-command flakes";
   };
 }
