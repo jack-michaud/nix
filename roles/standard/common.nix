@@ -14,7 +14,7 @@
   # $ nix search wget
   environment.systemPackages = with pkgs; [
     wget vim
-    node
+    nodejs
     ripgrep
     git
     ranger
