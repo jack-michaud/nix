@@ -7,6 +7,7 @@
       "super + w" = "${pkgs.firefox}/bin/firefox";
       "super + a" = "${pkgs.pavucontrol}/bin/pavucontrol";
       "super + n" = "${pkgs.gnome3.networkmanagerapplet}/bin/nm-connection-editor";
+      "super + x" = "${pkgs.betterlockscreen}/bin/betterlockscreen -l dim";
 
       # Brightness
       "F5" = "/run/current-system/sw/bin/light -U 5";
