@@ -17,6 +17,7 @@ let
   ];
   plugins = with pkgs.vimPlugins; [
     vim-fugitive
+    vim-rhubarb
     vim-dispatch
     vim-sneak
     vim-nix
