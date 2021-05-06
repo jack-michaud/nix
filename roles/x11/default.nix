@@ -4,6 +4,8 @@
     ./rofi.nix
     ./sxhkd.nix
     ./light.nix
+    ./picom.nix
+    ./xresources.nix
   ];
 
   # Enable the X11 windowing system.
