@@ -6,6 +6,8 @@
 
   boot.loader.systemd-boot.enable = true;
 
+  environment.sessionVariables.EDITOR = "nvim";
+
   i18n.defaultLocale = "en_US.UTF-8";
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
@@ -19,10 +21,12 @@
     shell = pkgs.fish;
   };
 
-  nix = {
-    package = pkgs.nixFlakes;
-    extraOptions = lib.optionalString (config.nix.package == pkgs.nixFlakes)
-    "experimental-features = nix-command flakes";
-  };
+  environment.systemPackages = with pkgs; [
+    firefox
+    discord
+    obsidian
+    vifm
+  ];
+
 }
 

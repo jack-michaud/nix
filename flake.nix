@@ -53,7 +53,6 @@
       in {}
       // (system-config "ajax" "x86_64-linux")
       ;
-      overlay = mkOverlay "x86_64-linux";
 
       darwinConfigurations = let 
         darwin-system-config = name: username: system: 
