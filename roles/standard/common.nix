@@ -8,7 +8,9 @@
     ./fish.nix
   ];
 
-  users.users.${username} = {};
+  users.users.${username} = {
+    shell = pkgs.fish;
+  };
 
   # List packages installed in system profile. To search, run:
   # $ nix search wget
@@ -19,6 +21,7 @@
     git
     ranger
     z-lua
+    fish
   ];
 
   nix = {
