@@ -72,6 +72,7 @@
         };
       in {}
       // darwin-system-config "DAHDEE" "Jack" "x86_64-darwin"
+      // darwin-system-config "Jack-Michaud" "jack" "aarch64-darwin"
       ;
     };
 }
