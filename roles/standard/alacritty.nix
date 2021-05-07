@@ -9,6 +9,7 @@
     settings = {
       env = {
         "TERM" = "xterm-256color";
+        "SHELL" = "fish";
       };
       window = {
         padding = {
