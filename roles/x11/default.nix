@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, username, ... }:
+{ lib, config, pkgs, options, username, utilScripts, ... }:
 {
   imports = [
     ./rofi.nix
@@ -34,7 +34,7 @@
     date > /tmp/date
     ${pkgs.feh}/bin/feh --bg-scale --no-xinerama ~/Downloads/yz6ggt7m18l41.png
     while true; do
-      ${(pkgs.callPackage ./dwm-status.nix {})}/bin/dwmStatus
+      ${(pkgs.callPackage ./dwm-status.nix { inherit utilScripts; })}/bin/dwmStatus
       sleep 3 &
     done &
   '';

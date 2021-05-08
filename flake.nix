@@ -24,7 +24,7 @@
           config = { allowUnfree = true; };
         };
       };
-      mkUtilScripts = system: import ./utilScripts.nix {
+      mkUtilScripts = system: import ./utilScripts {
         pkgs = import nixpkgs-git {
           inherit system;
           config = { allowUnfree = true; };

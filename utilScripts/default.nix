@@ -10,4 +10,6 @@
   test-script = pkgs.writeShellScriptBin "test-script" ''
     echo 'testo scripto'
   '';
+
+  spotify-dbus-status = callPackage ./spotify-dbus-spotify.nix {};
 }

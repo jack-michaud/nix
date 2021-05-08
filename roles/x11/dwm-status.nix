@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, utilScripts, ... }:
 with pkgs;
 let
   dwmStatus = pkgs.writeShellScriptBin "dwmStatus" ''
@@ -48,12 +48,12 @@ let
         echo -ne  $mem%
      }
     
-    #getMusic() {
-    #    music_str=`python /home/jack/Programs/polybar-spotify/spotify_status.py -f '{artist} - {song}'`
-    #    if [[ ! -z $music_str ]]; then
-    #      echo -ne " $music_str "
-    #    fi
-    #}
+    getMusic() {
+        music_str=`${utilScripts.spotify-dbus-status}/bin/spotify-dbus-status -f '{artist} - {song}'`
+        if [[ ! -z $music_str ]]; then
+          echo -ne " $music_str "
+        fi
+    }
     
     getTime() {
         tme="$(date '+%A %D %H:%M')"
