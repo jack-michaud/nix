@@ -10,6 +10,7 @@
       ../../roles/wireless
       ../../roles/sync
       ../../roles/personal-messaging
+      ../../roles/dev
     ];
 
   networking.hostName = "ajax"; # Define your hostname.
