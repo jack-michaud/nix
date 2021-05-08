@@ -26,6 +26,5 @@
     vifm
     betterlockscreen
   ];
-
 }
 

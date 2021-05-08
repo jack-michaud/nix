@@ -1,6 +1,5 @@
 { home-manager, pkgs, username, ... }:
 {
-  
   home-manager.users."${username}".programs.rofi = {
     enable = true;
     # Theming was done in xresources
