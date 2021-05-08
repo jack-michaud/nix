@@ -25,6 +25,7 @@
     obsidian
     vifm
     betterlockscreen
+    spotify
   ];
 }
 
