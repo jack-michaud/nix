@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, dwm, ... }:
+{ lib, config, pkgs, options, username, ... }:
 {
   imports = [
     ./rofi.nix
@@ -40,4 +40,10 @@
   '';
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
+
+  # Let home manager manage xsession
+  home-manager.users.${username}.xsession = {
+    enable = true;
+    windowManager.command = "${pkgs.dwm}/bin/dwm";
+  };
 }
