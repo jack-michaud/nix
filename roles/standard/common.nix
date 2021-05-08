@@ -15,9 +15,7 @@
 
   # List packages installed in system profile. To search, run:
   # $ nix search wget
-  environment.systemPackages = with pkgs; let
-    
-  in [
+  environment.systemPackages = with pkgs; [
     wget vim
     nodejs
     ripgrep
@@ -26,7 +24,7 @@
     z-lua
     fish
     github-cli
-    
+    steam
   ] ++ builtins.attrValues utilScripts; 
 
   nix = {
@@ -34,5 +32,4 @@
     extraOptions = lib.optionalString (config.nix.package == pkgs.nixFlakes)
     "experimental-features = nix-command flakes";
   };
-
 }
