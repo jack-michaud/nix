@@ -6,6 +6,7 @@
     ./light.nix
     ./picom.nix
     ./xresources.nix
+    ./dunst.nix
   ];
 
   # Enable the X11 windowing system.
