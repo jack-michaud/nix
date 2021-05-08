@@ -22,7 +22,6 @@
 
   environment.systemPackages = with pkgs; [
     firefox
-    discord
     obsidian
     vifm
     betterlockscreen
