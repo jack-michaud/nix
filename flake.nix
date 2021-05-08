@@ -24,16 +24,23 @@
           config = { allowUnfree = true; };
         };
       };
+      mkUtilScripts = system: import ./utilScripts.nix {
+        pkgs = import nixpkgs-git {
+          inherit system;
+          config = { allowUnfree = true; };
+        };
+      };
     in rec {
       nixosConfigurations = let
-        system-config = name: system:
+        system-config = hostname: username: system:
         let
           myoverlay = mkOverlay system;
+          utilScripts = mkUtilScripts system;
         in {
-          "${name}" = nixpkgs.lib.makeOverridable nixpkgs.lib.nixosSystem {
+          "${hostname}" = nixpkgs.lib.makeOverridable nixpkgs.lib.nixosSystem {
             inherit system;
-            specialArgs = {
-              username = "jack";
+            specialArgs = rec {
+              inherit hostname username utilScripts;
             };
             modules = [ 
               {
@@ -45,28 +52,36 @@
               { 
                 home-manager.useGlobalPkgs = true;
               }
-              (import (./hosts + "/${name}/default.nix"))
-              (import (./hosts + "/${name}/hardware-configuration.nix"))
+              (import (./hosts + "/${hostname}/default.nix"))
+              (import (./hosts + "/${hostname}/hardware-configuration.nix"))
             ];
           };
         };
       in {}
-      // (system-config "ajax" "x86_64-linux")
+      // (system-config "ajax" "jack" "x86_64-linux")
       ;
 
       darwinConfigurations = let 
-        darwin-system-config = name: username: system: 
-        {
-          "${name}" = darwin.lib.darwinSystem {
+        darwin-system-config = hostname: username: system: 
+        let
+          myoverlay = mkOverlay system;
+        in {
+          "${hostname}" = darwin.lib.darwinSystem {
+            # inherit system;
             specialArgs = {
-              inherit username;
+              inherit hostname username;
             };
             modules = [
+              {
+                nixpkgs.overlays = [ myoverlay ];
+                nixpkgs.config.allowUnfree = true;
+                nix.registry.nixpkgs.flake = nixpkgs;
+              }
               home-manager.darwinModules.home-manager 
               { 
                 home-manager.useGlobalPkgs = true;
               }
-              (import (./hosts + "/${name}/configuration.nix"))
+              (import (./hosts + "/${hostname}/configuration.nix"))
             ];
           };
         };
