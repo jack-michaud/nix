@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, username, hostname, util, ... }:
+{ lib, config, pkgs, options, username, hostname, utilScripts, ... }:
 {
   imports = [
     ./cachix
