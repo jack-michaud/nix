@@ -2,6 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs-git.url = "github:NixOS/nixpkgs/master";
+    nixpkgs-darwin.url = "github:NixOS/nixpkgs/nixpkgs-20.09-darwin";
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -75,7 +76,7 @@
               {
                 nixpkgs.overlays = [ myoverlay ];
                 nixpkgs.config.allowUnfree = true;
-                nix.registry.nixpkgs.flake = nixpkgs;
+                nix.registry.nixpkgs.flake = nixpkgs-darwin;
               }
               home-manager.darwinModules.home-manager 
               { 
