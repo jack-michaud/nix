@@ -6,7 +6,7 @@
       ../../roles/standard/linux.nix
       ../../roles/ssh
       ../../roles/x11
-      ../../roles/sound
+      #../../roles/sound
       ../../roles/wireless
       ../../roles/sync
       ../../roles/personal-messaging
