@@ -59,6 +59,7 @@
         };
       in {}
       // (system-config "ajax" "jack" "x86_64-linux")
+      // (system-config "CASTOR" "jack" "x86_64-linux")
       ;
 
       darwinConfigurations = let 
