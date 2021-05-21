@@ -68,7 +68,6 @@
           myoverlay = mkOverlay system;
         in {
           "${hostname}" = darwin.lib.darwinSystem {
-            # inherit system;
             specialArgs = {
               inherit hostname username;
             };

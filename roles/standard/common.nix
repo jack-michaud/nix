@@ -1,5 +1,18 @@
 { lib, config, pkgs, options, username, hostname, utilScripts, ... }:
-{
+let
+  common_packages = with pkgs; [
+    wget vim
+    nodejs
+    ripgrep
+    git
+    ranger
+    z-lua
+    fish
+    github-cli
+    fzf
+    wireguard-tools
+  ];
+in {
   imports = [
     ./cachix
     ./neovim
@@ -10,22 +23,13 @@
 
   users.users.${username} = {
     shell = pkgs.fish;
+    packages = common_packages;
   };
 
 
   # List packages installed in system profile. To search, run:
   # $ nix search wget
-  environment.systemPackages = with pkgs; [
-    wget vim
-    nodejs
-    ripgrep
-    git
-    ranger
-    z-lua
-    fish
-    github-cli
-    steam
-  ] ++ builtins.attrValues utilScripts; 
+  # environment.systemPackages = common_packages;
 
   nix = {
     package = pkgs.nixFlakes;
