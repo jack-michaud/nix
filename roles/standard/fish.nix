@@ -4,6 +4,10 @@
     enable = true;
     shellInit = ''
       set fish_greeting ""
+      alias dcl="docker-compose logs"
+      alias dcd="docker-compose down"
+      alias dcu="docker-compose up"
+      alias dcp="docker-compose ps"
     '';
   };
 }
