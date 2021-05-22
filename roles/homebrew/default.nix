@@ -1,3 +1,8 @@
+{
+  dev ? true,
+  personal ? false,
+  work ? false,
+}:
 { config, pkgs, username, ... }:
 
 let
@@ -18,8 +23,18 @@ let
     "obsidian"
     "ransomwhere"
     "syncthing"
+    "spotify"
+  ] 
+  ++ (if dev then [
     "visual-studio-code"
-  ];
+    # SQL editor + DB explorer
+    "beekeeper-studio"
+  ] else [])
+  ++ (if work then [
+  ] else [])
+  ++ (if personal then [
+    "discord"
+  ] else []);
   #user_mas_apps = {
   #  WireGuard = 1451685025;
   #};
