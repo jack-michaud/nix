@@ -9,10 +9,15 @@ let
     "homebrew/core"
     "homebrew/services"
   ];
+  user_brew_formulae = [
+    "choose-gui"
+  ];
   user_brew_casks = [
     "bitwarden"
-    "syncthing"
+    "hiddenbar"
     "obsidian"
+    "ransomwhere"
+    "syncthing"
     "visual-studio-code"
   ];
   #user_mas_apps = {
@@ -27,6 +32,7 @@ in {
       cask_args appdir: "~/Applications"
     '';
     taps = user_brew_taps;
+    brews = user_brew_formulae;
     casks = user_brew_casks;
     #masApps = user_mas_apps;
   };
