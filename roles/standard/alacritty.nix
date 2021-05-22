@@ -19,7 +19,7 @@
       };
       font = {
         normal.family = "Iosevka";
-        size = 11.0;
+        size = 13.0;
       };
       colors = {
         primary = {
