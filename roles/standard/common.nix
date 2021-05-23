@@ -1,8 +1,11 @@
-{ lib, config, pkgs, options, username, hostname, utilScripts, ... }:
+{ lib, config, pkgs, options, username, hostname, ... }:
 let
+  # List packages installed in user profile. To search, run:
+  # $ nix search wget
   common_packages = with pkgs; [
     wget vim
     nodejs
+    python3
     ripgrep
     git
     ranger
@@ -25,11 +28,6 @@ in {
     shell = pkgs.fish;
     packages = common_packages;
   };
-
-
-  # List packages installed in system profile. To search, run:
-  # $ nix search wget
-  # environment.systemPackages = common_packages;
 
   nix = {
     package = pkgs.nixFlakes;

@@ -29,6 +29,7 @@
     xclip
     xbrightness
     feh
+    mesa_drivers
   ];
 
   services.xserver.displayManager.sessionCommands = ''

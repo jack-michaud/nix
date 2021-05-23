@@ -10,6 +10,9 @@
       url = "github:jack-michaud/dwm";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    #emacs = {
+    #  url = "github:jack-michaud/doom.d";
+    #};
 
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";

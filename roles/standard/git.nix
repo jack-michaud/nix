@@ -4,5 +4,11 @@
     enable = true;
     userName = "Jack Michaud";
     userEmail = "jack@lomz.me";
+
+    iniContent = {
+      init = {
+        defaultBranch = "main";
+      };
+    };
   };
 }

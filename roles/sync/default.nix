@@ -1,12 +1,25 @@
 { username, ... }:
 {
   services.syncthing = {
-    # Research https://docs.syncthing.net/users/stdiscosrv.html
-    # before turning on
-    #enable = true;
-    enable = false;
+    enable = true;
     user = username;
     openDefaultPorts = true;
     dataDir = "/home/${username}/Sync";
+    #declarative = {
+    #  folders = {
+    #    "/home/${username}/Vault" = {
+    #      id = "ussmr-jztfp";
+    #    };
+    #    "/home/${username}/Sync" = {
+    #      id = "default";
+    #    };
+    #    "/home/${username}/wg-configs" = {
+    #      id = "gs6lj-dorhv";
+    #    };
+    #    "/home/${username}/openvpn-configs" = {
+    #      id = "jmsgr-rwdno";
+    #    };
+    #  };
+    #};
   };
 }

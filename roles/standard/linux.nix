@@ -1,4 +1,4 @@
-{ lib, config, pkgs, options, username, ... }:
+{ lib, config, pkgs, options, username, utilScripts, ... }:
 {
   imports = [
     ./common.nix
@@ -20,12 +20,23 @@
     ];
   };
 
+  networking = {
+    nameservers = [ "192.168.0.250" "1.1.1.1" ];
+    firewall = {
+      enable = true;
+      allowedTCPPorts = [ 22 ];
+    };
+    wireguard.enable = true;
+  };
+
   environment.systemPackages = with pkgs; [
     firefox
     obsidian
     vifm
     betterlockscreen
     spotify
-  ];
+    gimp
+    steam
+  ] ++ builtins.attrValues utilScripts;
 }
 

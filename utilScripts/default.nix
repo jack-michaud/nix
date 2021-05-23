@@ -21,4 +21,6 @@ with pkgs;
       ${libnotify}/bin/notify-send -i $file "screenship taken" &&
       rm $file
   '';
+
+  use-vpn = callPackage ./use-vpn.nix {};
 }

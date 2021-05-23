@@ -1,4 +1,4 @@
-{ home-manager, pkgs, utils, username, ... }:
+{ home-manager, pkgs, username, ... }:
 {
   home-manager.users."${username}".services.sxhkd = {
     enable = true;
