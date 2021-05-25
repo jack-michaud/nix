@@ -1,6 +1,9 @@
 # nix
 
-My NixOS configs.
+My NixOS configs. Heavy influence from:
+
+- [Henrik Lissner](https://github.com/hlissner/dotfiles/)
+- [Kyle Sferrazza](https://gitlab.com/kylesferrazza/nix/)
 
 
 ## Using on Darwin
