@@ -3,14 +3,14 @@
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
-      ../../roles/standard/linux.nix
-      ../../roles/ssh
-      ../../roles/x11
-      ../../roles/sound
-      ../../roles/wireless
-      ../../roles/sync
-      ../../roles/personal-messaging
-      ../../roles/dev
+      ../../../roles/standard/linux.nix
+      ../../../roles/ssh
+      ../../../roles/x11
+      ../../../roles/sound
+      ../../../roles/wireless
+      ../../../roles/sync
+      ../../../roles/personal-messaging
+      ../../../roles/dev
     ];
 
   networking.hostName = hostname; # Define your hostname.
