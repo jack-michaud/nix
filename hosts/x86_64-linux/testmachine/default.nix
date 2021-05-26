@@ -6,6 +6,16 @@
 
 
   config.modules = {
+    dev = {
+      docker = {
+        enable = true;
+      };
+    };
+    desktop = {
+      sxhkd = {
+        enable = true;
+      };
+    };
     wms.dwm = {
       enable = true;
     };
