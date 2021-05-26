@@ -2,7 +2,7 @@
 {
 
   networking.networkmanager.enable = true;
-  services.gnome3.gnome-keyring.enable = true;
+  services.gnome.gnome-keyring.enable = true;
 
   users.users.jack.extraGroups = [ "networkmanager" ];
 }

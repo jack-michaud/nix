@@ -23,6 +23,8 @@ with lib.my;
     in {
       package = pkgs.nixFlakes;
       extraOptions = "experimental-features = nix-command flakes";
+      # Fix for https://github.com/NixOS/nixpkgs/issues/124215
+      sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
       nixPath = nixPathInputs ++ [
         "nixpkgs-overlays=${config.dotfiles.dir}/overlays"
         "dotfiles=${config.dotfiles.dir}"

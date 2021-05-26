@@ -55,6 +55,11 @@
       mkOverlay = 
         system: final: prev: {
           unstable = pkgs' system;
+          dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
+            src = dwm.defaultPackage.${system}.src;
+            installPhase = dwm.defaultPackage.${system}.installPhase;
+            buildInputs = dwm.defaultPackage.${system}.buildInputs;
+          });
         };
 
       nixosConfigurations = 

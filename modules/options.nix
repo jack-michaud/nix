@@ -21,6 +21,7 @@ with lib.my;
       services   = mkOpt' attrs {} "Services to enable via home-manager";
       configFile = mkOpt' attrs {} "Files to place in $XDG_CONFIG_HOME";
       dataFile   = mkOpt' attrs {} "Files to place in $XDG_DATA_HOME";
+      xsession   = mkOpt' attrs {} "Xsession settings";
     };
 
     env = mkOption {
@@ -59,9 +60,11 @@ with lib.my;
       #   home.file        ->  home-manager.users.jack.home.file
       #   home.configFile  ->  home-manager.users.jack.home.xdg.configFile
       #   home.dataFile    ->  home-manager.users.jack.home.xdg.dataFile
+      #   home.xsession     ->  home-manager.users.jack.xsession
       users.${config.user.name} = {
         programs = mkAliasDefinitions options.home.programs;
         services = mkAliasDefinitions options.home.services;
+        xsession = mkAliasDefinitions options.home.xsession;
         home = {
           file = mkAliasDefinitions options.home.file;
           # Necessary for home-manager to work with flakes, otherwise it will
