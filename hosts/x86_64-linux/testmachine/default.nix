@@ -23,7 +23,7 @@
       };
     };
     wms.dwm = {
-      enable = true;
+      enable = false;
     };
     editors.nvim = {
       enable = true;

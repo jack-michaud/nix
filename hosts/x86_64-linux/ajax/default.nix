@@ -1,16 +1,8 @@
-{ config, pkgs, lib, ... }:
+{ config, lib, ... }:
 {
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
-      #../../../roles/standard/linux.nix
-      #../../../roles/ssh
-      #../../../roles/x11
-      #../../../roles/sound
-      #../../../roles/wireless
-      #../../../roles/sync
-      #../../../roles/personal-messaging
-      #../../../roles/dev
     ];
 
   config = {
@@ -28,8 +20,6 @@
     networking.useDHCP = false;
     networking.interfaces.enp0s25.useDHCP = true;
     networking.interfaces.wlp4s0.useDHCP = true;
-
-    virtualisation.docker.enable = true;
 
     # Some programs need SUID wrappers, can be configured further or are
     # started in user sessions.
@@ -75,6 +65,7 @@
         spotify.enable = true;
         gimp.enable = true;
         obsidian.enable = true;
+        emacs.enable = true;
       };
       sxhkd = {
         enable = true;
@@ -89,6 +80,7 @@
     };
     wireless.enable = true;
     tools.wireguard.enable = true;
+    tools.openvpn.enable = true;
   };
 }
 
