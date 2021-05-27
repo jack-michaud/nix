@@ -9,6 +9,8 @@ in {
   };
 
   config = mkIf cfg.enable {
+    environment.sessionVariables.EDITOR = "nvim";
+
     home.programs.neovim = {
       enable = true;
       viAlias = true;

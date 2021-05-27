@@ -66,8 +66,13 @@ with lib.my;
     coreutils
     git
     vim
+    fzf
     wget
     gnumake
     unzip
+    ripgrep
+    ranger
+    nodejs
+    python3
   ];
 }

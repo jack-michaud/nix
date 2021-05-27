@@ -12,6 +12,12 @@
       };
     };
     desktop = {
+      sound.enable = true;
+      terminals = {
+        alacritty = {
+          enable = true;
+        };
+      };
       sxhkd = {
         enable = true;
       };
@@ -21,6 +27,11 @@
     };
     editors.nvim = {
       enable = true;
+    };
+    shells.fish.enable = true;
+    services = {
+      syncthing.enable = true;
+      ssh.enable = true;
     };
   };
   
