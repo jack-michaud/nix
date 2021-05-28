@@ -7,7 +7,14 @@ with lib.my;
     let
       isDarwin = strings.hasInfix "darwin" system; 
     in
-      (if isDarwin then darwin.lib.darwinSystem else nixosSystem) {
+      if isDarwin then darwin.lib.darwinSystem {
+        specialArgs = { inherit lib inputs isDarwin; };
+        modules = [
+          (filterAttrs (n: v: !elem n [ "system" ]) attrs)
+          ../.   # /default.nix
+          (import path)
+        ];
+      } else nixosSystem {
         inherit system;
         specialArgs = { inherit lib inputs system isDarwin; };
         modules = [

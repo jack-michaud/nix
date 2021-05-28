@@ -6,7 +6,7 @@
 
   boot.loader.systemd-boot.enable = true;
 
-  environment.sessionVariables.EDITOR = "nvim";
+  env.EDITOR = "nvim";
 
   i18n.defaultLocale = "en_US.UTF-8";
 
