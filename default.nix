@@ -4,8 +4,10 @@ with lib;
 with lib.my;
 {
   imports =
-    # I use home-manager to deploy files to $HOME; little else
-    [ (if isDarwin then inputs.home-manager.darwinModules.home-manager else inputs.home-manager.nixosModules.home-manager) ]
+    # Home manager
+    [ 
+      (if isDarwin then inputs.home-manager.darwinModules.home-manager else inputs.home-manager.nixosModules.home-manager) 
+    ]
     # All my personal modules
     ++ (mapModulesRec' (toString ./modules) import);
 
