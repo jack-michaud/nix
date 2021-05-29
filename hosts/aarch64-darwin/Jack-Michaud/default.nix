@@ -17,6 +17,9 @@
       };
       desktop = {
         terminals.alacritty.enable = true;
+        apps = {
+          obsidian.enable = true;
+        };
       };
     };
   };
