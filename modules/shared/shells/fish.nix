@@ -20,7 +20,8 @@ in {
         alias dcu="docker-compose up"
         alias dcp="docker-compose ps"
 
-        alias code="cd (find ${config.dotfiles.codeDir} -maxdepth 3 | fzf)"
+        # cd into a Code directory
+        alias coad="cd (find ${config.dotfiles.codeDir} -maxdepth 3 | fzf)"
       '';
     };
     user = {
