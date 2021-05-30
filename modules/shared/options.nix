@@ -16,6 +16,7 @@ with lib.my;
       binDir = mkOpt t "${config.dotfiles.dir}/../bin";
       configDir = mkOpt t "${config.dotfiles.dir}/../config";
       vaultDir = mkOpt t "${config.user.home}/Vault";
+      codeDir = mkOpt t "${config.user.home}/Code";
     };
 
     home = {

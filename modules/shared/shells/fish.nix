@@ -19,6 +19,8 @@ in {
         alias dcd="docker-compose down"
         alias dcu="docker-compose up"
         alias dcp="docker-compose ps"
+
+        alias code="cd (find ${config.dotfiles.codeDir} -maxdepth 3 | fzf)"
       '';
     };
     user = {
