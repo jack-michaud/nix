@@ -15,6 +15,7 @@ with lib.my;
       xbrightness
       feh
       mesa_drivers
+      libnotify
     ];
 
     services.xserver.displayManager.sessionCommands = ''
