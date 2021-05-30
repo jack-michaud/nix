@@ -9,7 +9,7 @@ in {
 
   config = mkIf cfg.enable {
     homebrew.casks = [
-      "obsidian"
+      "visual-studio-code"
     ];
   };
 }
