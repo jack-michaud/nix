@@ -13,7 +13,7 @@ with lib.my;
           "/etc/dotfiles"
         ]);
       modulesDir = mkOpt t "${config.dotfiles.dir}/modules";
-      binDir = mkOpt t "${config.dotfiles.dir}/bin";
+      binDir = mkOpt t "${config.dotfiles.dir}/../bin";
       configDir = mkOpt t "${config.dotfiles.dir}/../config";
       vaultDir = mkOpt t "${config.user.home}/Vault";
     };

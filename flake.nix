@@ -24,7 +24,7 @@
       mkPkgs = system: pkgs: extraOverlays: import pkgs {
         inherit system;
         config.allowUnfree = true;
-        overlays = extraOverlays; #++ (lib.attrValues (self.mkOverlays system));
+        overlays = extraOverlays;
       };
       pkgs  = system: mkPkgs system nixpkgs [ (self.mkOverlay system) ];
       pkgs' = system: mkPkgs system nixpkgs-git [];
@@ -54,8 +54,5 @@
 
       darwinConfigurations = 
         mapHosts ./hosts/x86_64-darwin "x86_64-darwin" {} // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {};
-
-      #mkOverlays = system:
-      #  mapModules ./overlays (p: import p { inherit inputs system; });
     };
 }

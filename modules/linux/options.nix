@@ -10,7 +10,7 @@ with lib.my;
       isNormalUser = true;
       group = "users";
       uid = 1000;
-      initialPassword = "${name}";
+      initialPassword = "${config.user.name}";
     };
 
     # Install user packages to /etc/profiles instead. Necessary for
