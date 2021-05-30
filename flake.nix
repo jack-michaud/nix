@@ -39,15 +39,20 @@
 
     in {
       lib = lib.my;
-      mkOverlay = 
-        system: final: prev: {
-          unstable = pkgs' system;
-          dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
-            src = dwm.defaultPackage.${system}.src;
-            installPhase = dwm.defaultPackage.${system}.installPhase;
-            buildInputs = dwm.defaultPackage.${system}.buildInputs;
-          });
-        };
+      mkOverlay = system: final: prev: {
+        unstable = pkgs' system;
+        dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
+          src = dwm.defaultPackage.${system}.src;
+          installPhase = dwm.defaultPackage.${system}.installPhase;
+          buildInputs = dwm.defaultPackage.${system}.buildInputs;
+        });
+        my = self.mkPackages system;
+      };
+
+      mkPackages = system: let
+        _pkgs = pkgs system;
+      in
+        mapModules ./packages (p: _pkgs.callPackage p {});
 
       nixosConfigurations = 
         mapHosts ./hosts/x86_64-linux "x86_64-linux" {};
