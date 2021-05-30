@@ -66,6 +66,7 @@
         spotify.enable = true;
         gimp.enable = true;
         obsidian.enable = true;
+        code.enable = true;
         # Doom is kinda broken.
         emacs.enable = false;
 
