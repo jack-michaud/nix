@@ -23,10 +23,15 @@ in {
         vim-rhubarb
         vim-dispatch
         vim-sneak
-        vim-nix
         fzf-vim
         coc-nvim
         coc-snippets
+        coc-rust-analyzer
+        # languages
+        vim-nix
+        vim-fish
+        rust-vim
+        pkgs.nodePackages.coc-rust-analyzer
       ];
     };
   };
