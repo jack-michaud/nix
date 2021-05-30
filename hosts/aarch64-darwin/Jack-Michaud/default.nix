@@ -9,6 +9,10 @@
     services.nix-daemon.enable = false;
 
     modules = {
+      dev = {
+        git.enable = true;
+        cloner.enable = true;
+      };
       editors = {
         nvim.enable = true;
       };

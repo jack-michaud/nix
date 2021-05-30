@@ -47,6 +47,7 @@
     dev = {
       docker.enable = true;
       git.enable = true;
+      cloner.enable = true;
     };
     desktop = {
       sound.enable = true;
@@ -65,7 +66,10 @@
         spotify.enable = true;
         gimp.enable = true;
         obsidian.enable = true;
-        emacs.enable = true;
+        # Doom is kinda broken.
+        emacs.enable = false;
+
+        email.enable = true;
       };
       sxhkd = {
         enable = true;

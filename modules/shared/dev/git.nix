@@ -5,7 +5,7 @@ with lib.my;
 let cfg = config.modules.dev.git;
 in {
   options.modules.dev.git = {
-    enable = mkBoolOpt true;
+    enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {
