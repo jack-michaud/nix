@@ -1,25 +1,5 @@
 {
   "nodes": {
-    "cloner": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1622354313,
-        "narHash": "sha256-Jnds+eSHNF1kCxRDHNRVFs/2Mu7f8H77y20wItD/Ixk=",
-        "owner": "jack-michaud",
-        "repo": "cloner",
-        "rev": "df6e411adbf3d32439fdde89aa93566c4c65d37a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "jack-michaud",
-        "repo": "cloner",
-        "type": "github"
-      }
-    },
     "darwin": {
       "inputs": {
         "nixpkgs": [
@@ -248,11 +228,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1622145920,
-        "narHash": "sha256-/tt6IApLuVcGP5auy4zjLzfm5+MBHYLS3Nauvv2U2EQ=",
+        "lastModified": 1622407737,
+        "narHash": "sha256-nmPEv1khCD7x1DIJPmTG6HBsqAgga6P/kpOx2yPQfxM=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "0e6c61a44092e98ba1d75b41f4f947843dc7814d",
+        "rev": "0e329cee4c17fa0b7df32233513b9cb2236d382b",
         "type": "github"
       },
       "original": {
@@ -295,11 +275,11 @@
     },
     "nixpkgs-git": {
       "locked": {
-        "lastModified": 1622238342,
-        "narHash": "sha256-+eYfAVVPI96i49WE+d0Wg9KPuk+s9M2ty2YfiCoyVR0=",
+        "lastModified": 1622415386,
+        "narHash": "sha256-4flel93nD+Os4pwbul6jFp1nUZHb3vJ6OxELHOlwXlc=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "acf171303eb625776d21f8a3366b911d4d1c2e75",
+        "rev": "6094bec3c3cb811800f6f71a8951328487b6df8c",
         "type": "github"
       },
       "original": {
@@ -311,11 +291,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1622194753,
-        "narHash": "sha256-76qtvFp/vFEz46lz5iZMJ0mnsWQYmuGYlb0fHgKqqMg=",
+        "lastModified": 1622282707,
+        "narHash": "sha256-+GOrUDsdneUqrOm9d+9bHXjEVoVcU8tm14WGVzbt6gg=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "540dccb2aeaffa9dc69bfdc41c55abd7ccc6baa3",
+        "rev": "6933d068c5d2fcff398e802f7c4e271bbdab6705",
         "type": "github"
       },
       "original": {
@@ -423,7 +403,6 @@
     },
     "root": {
       "inputs": {
-        "cloner": "cloner",
         "darwin": "darwin",
         "doom-emacs": "doom-emacs",
         "dwm": "dwm",
