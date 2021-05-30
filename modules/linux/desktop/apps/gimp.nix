@@ -10,7 +10,7 @@ in {
 
   config = mkIf cfg.enable {
     environment.systemPackages = [
-      pkgs.unstable.gimp
+      pkgs.gimp
     ];
   };
 }
