@@ -13,12 +13,15 @@
     #emacs = {
     #  url = "github:jack-michaud/doom.d";
     #};
+    doom-emacs.url = "github:vlaci/nix-doom-emacs";
+    doom-emacs.inputs.emacs-overlay.follows = "emacs-overlay";
+    emacs-overlay.url = "github:nix-community/emacs-overlay";
 
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin }:
+  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin, doom-emacs, ... }:
     let 
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays: import pkgs {
