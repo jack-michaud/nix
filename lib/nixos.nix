@@ -9,7 +9,7 @@ with lib.my;
       specialArgs = { inherit lib inputs isDarwin; generators = (import ../utils/generators.nix { inherit lib pkgs; }).mkGenerators system; };
     in
       if isDarwin then darwin.lib.darwinSystem {
-        inherit specialArgs;
+        specialArgs = specialArgs // { pkgs = pkgs system; };
         modules = [
           (filterAttrs (n: v: !elem n [ "system" ]) attrs)
           ../.   # /default.nix
