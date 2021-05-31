@@ -46,8 +46,6 @@ with lib.my;
       in {
         inherit name;
         description = "The primary user account";
-        home = "/home/${name}";
-
       };
 
     home-manager = {

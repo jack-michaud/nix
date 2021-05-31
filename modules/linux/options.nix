@@ -11,6 +11,7 @@ with lib.my;
       group = "users";
       uid = 1000;
       initialPassword = "${config.user.name}";
+      home = "/home/${config.user.name}";
     };
 
     # Install user packages to /etc/profiles instead. Necessary for

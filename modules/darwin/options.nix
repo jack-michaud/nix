@@ -7,6 +7,7 @@ with lib.my;
   options = with types; {
   };
   config = {
+    user.home = "/Users/${config.user.name}";
     environment.systemPath = [ "/usr/local/bin/" ];
 
     system.defaults = {
