@@ -24,7 +24,7 @@ with lib.my;
         nixPathInputs  = mapAttrsToList (n: v: "${n}=${v}") filteredInputs;
         registryInputs = mapAttrs (_: v: { flake = v; }) filteredInputs;
     in {
-      package = pkgs.nixFlakes;
+      package = pkgs.unstable.nixFlakes;
       extraOptions = "experimental-features = nix-command flakes";
       # Fix for https://github.com/NixOS/nixpkgs/issues/124215
       sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];

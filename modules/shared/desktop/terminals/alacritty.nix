@@ -10,7 +10,7 @@ in {
 
   config = mkIf cfg.enable {
     fonts.fonts = [
-      pkgs.iosevka
+      pkgs.iosevka-bin
     ];
     home.programs.alacritty = {
       enable = true;
