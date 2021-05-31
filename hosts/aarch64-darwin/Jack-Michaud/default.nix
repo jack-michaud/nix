@@ -5,12 +5,13 @@
     services.nix-daemon.enable = false;
 
     modules = {
+      homebrew.enable = true;
       dev = {
         git.enable = true;
-        cloner.enable = true;
+        cloner.enable = false;
       };
       editors = {
-        nvim.enable = true;
+        nvim.enable = false;
       };
       shells = {
         fish.enable = true;
@@ -20,7 +21,11 @@
         apps = {
           obsidian.enable = true;
           code.enable = true;
+          spotify.enable = true;
         };
+      };
+      services = {
+        syncthing.enable = true;
       };
     };
   };
