@@ -65,7 +65,11 @@
         steam.enable = true;
         spotify.enable = true;
         gimp.enable = true;
+
+        # writing 
         obsidian.enable = true;
+        logseq.enable = true;
+
         code.enable = true;
         # Doom is kinda broken.
         emacs.enable = false;
@@ -86,6 +90,47 @@
     wireless.enable = true;
     tools.wireguard.enable = true;
     tools.openvpn.enable = true;
+  };
+
+  # containers
+  config.containers.kafka1 = {
+    autoStart = false;
+    config = { config, pkgs, ... }: {
+      services.zookeeper = {
+        enable = true;
+      };
+      services.apache-kafka = {
+        enable = true;
+        port = 9002;
+        hostname = "localhost";
+        brokerId = 1;
+      };
+      networking.firewall.allowedTCPPorts = [9002];
+    };
+  };
+  config.containers.kafka2 = {
+    autoStart = false;
+    config = { config, pkgs, ... }: {
+      services.apache-kafka = {
+        enable = true;
+        port = 9003;
+        hostname = "localhost";
+        brokerId = 1;
+      };
+      networking.firewall.allowedTCPPorts = [9003];
+    };
+  };
+  config.containers.kafka3 = {
+    autoStart = false;
+    config = { config, pkgs, ... }: {
+      services.apache-kafka = {
+        enable = true;
+        port = 9004;
+        hostname = "localhost";
+        brokerId = 1;
+      };
+      networking.firewall.allowedTCPPorts = [9004];
+    };
   };
 }
 
