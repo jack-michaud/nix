@@ -5,7 +5,7 @@ with lib.my;
 let cfg = config.modules.desktop.apps.logseq;
 in {
   options.modules.desktop.apps.logseq = {
-    enable = mkBoolOpt true;
+    enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {

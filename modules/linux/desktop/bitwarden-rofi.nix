@@ -5,7 +5,7 @@ with lib.my;
 let cfg = config.modules.desktop.bitwarden-rofi;
 in {
   options.modules.desktop.bitwarden-rofi = {
-    enable = mkBoolOpt true;
+    enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {

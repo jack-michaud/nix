@@ -5,7 +5,7 @@ with lib.my;
 let cfg = config.modules.dev.cloner;
 in {
   options.modules.dev.cloner = {
-    enable = mkBoolOpt true;
+    enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {

@@ -5,7 +5,7 @@ with lib.my;
 let cfg = config.modules.dev.python;
 in {
   options.modules.dev.python = {
-    enable = mkBoolOpt true;
+    enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {
