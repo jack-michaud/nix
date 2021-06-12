@@ -19,6 +19,8 @@ in {
         alias dcd="docker-compose down"
         alias dcu="docker-compose up"
         alias dcp="docker-compose ps"
+        alias dcr="docker-compose restart"
+        alias dce="docker-compose exec"
 
         # cd into a Code directory
         alias coad="cd (find ${config.dotfiles.codeDir} -maxdepth 3 | fzf)"
