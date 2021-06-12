@@ -13,7 +13,7 @@ in {
       enable = true;
       # Theming was done in xresources
       extraConfig = {
-        modi = "drun,emoji";
+        modi = "drun,emoji,run";
         kb-primary-paste = "Alt+V";
         kb-primary-copy = "Alt+C";
       };
