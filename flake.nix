@@ -36,7 +36,13 @@
         config.allowUnfree = true;
         overlays = extraOverlays;
       };
-      pkgs  = system: mkPkgs system nixpkgs [ (self.mkOverlay system) ];
+      pkgs = system: mkPkgs system nixpkgs ([ 
+        (self.mkOverlay system) 
+      ] ++ (if system == "x86_64-linux" then [
+        (final: prev: {
+          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
+        })
+      ] else []));
       pkgs' = system: mkPkgs system nixpkgs-git [];
 
       lib = nixpkgs.lib.extend (self: super: {
@@ -57,10 +63,7 @@
           buildInputs = dwm.defaultPackage.${system}.buildInputs;
         });
         my = self.mkPackages system;
-        # add kyle-sferrazza-nix to overlays if this is a x86_64-linux system
-      } // (if system == "x86_64-linux" then {
-        kyle-sferrazza-overlay = kyle-sferrazza-nix.overlay;
-      } else {});
+      };
 
       mkPackages = system: let
         _pkgs = pkgs system;

@@ -1,4 +1,4 @@
-{ config, options, lib, pkgs, kyle-sferrazza-overlay, ... }:
+{ config, options, lib, pkgs, ... }:
 
 with lib;
 with lib.my;
@@ -10,7 +10,7 @@ in {
 
   config = mkIf cfg.enable {
     user.packages = [
-      kyle-sferrazza-overlay.bitwarden-rofi
+      pkgs.kyle.bitwarden-rofi
     ];
   };
 }
