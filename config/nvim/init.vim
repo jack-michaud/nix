@@ -54,3 +54,9 @@ let g:coc_snippet_prev = '<c-k>'
 " Use <leader>x for convert visual selected code to snippet
 xnoremap <leader>x  <Plug>(coc-convert-snippet)
 
+" LSP Stuff
+nmap <silent> <leader>. <Plug>(coc-definition)
+nmap <silent> <leader>, <Plug>(coc-references)
+" Applying codeAction to the selected region.
+" Example: `<leader>aap` for current paragraph
+xmap <leader>a  <Plug>(coc-codeaction-selected)
