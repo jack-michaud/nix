@@ -17,11 +17,18 @@
     doom-emacs.inputs.emacs-overlay.follows = "emacs-overlay";
     emacs-overlay.url = "github:nix-community/emacs-overlay";
 
+    kyle-sferrazza-nix = {
+      url = "https://gitlab.com/kylesferrazza/nix/-/archive/main/nix-main.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-git";
+    };
+
+
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin, doom-emacs, ... }:
+  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin, doom-emacs, kyle-sferrazza-nix, ... }:
     let 
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays: import pkgs {
@@ -50,7 +57,10 @@
           buildInputs = dwm.defaultPackage.${system}.buildInputs;
         });
         my = self.mkPackages system;
-      };
+        # add kyle-sferrazza-nix to overlays if this is a x86_64-linux system
+      } // (if system == "x86_64-linux" then {
+        kyle-sferrazza-overlay = kyle-sferrazza-nix.overlay;
+      } else {});
 
       mkPackages = system: let
         _pkgs = pkgs system;
