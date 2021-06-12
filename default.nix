@@ -60,7 +60,6 @@ with lib.my;
     ripgrep
     ranger
     nodejs
-    python3
   ];
 } // (if isDarwin then {
   system.stateVersion = 4;
