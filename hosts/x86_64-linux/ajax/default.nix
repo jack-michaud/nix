@@ -48,6 +48,7 @@
       docker.enable = true;
       git.enable = true;
       cloner.enable = true;
+      python.enable = true;
     };
     desktop = {
       sound.enable = true;
