@@ -52,6 +52,7 @@
     };
     desktop = {
       sound.enable = true;
+      bitwarden-rofi.enable = true;
       terminals = {
         alacritty = {
           enable = true;
