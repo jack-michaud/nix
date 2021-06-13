@@ -14,9 +14,7 @@
 
     # Enable the X11 windowing system.
     services.xserver = {
-      enable = true;
-      displayManager.gdm.enable = true;
-      desktopManager.gnome.enable = true;
+      enable = false;
     };
 
     # The global useDHCP flag is deprecated, therefore explicitly set to false here.
@@ -39,6 +37,7 @@
 
 
   config.modules = {
+    raspberrypi4.enable = true;
     editors.nvim.enable = true;
     shells.fish.enable = true;
     services.ssh.enable = true;

@@ -65,7 +65,7 @@ with lib.my;
 } // (if isDarwin then {
   system.stateVersion = 4;
 } else {
-  system.stateVersion = "21.05";
+  system.stateVersion = mkDefault "21.05";
   ## Some reasonable, global defaults
   # This is here to appease 'nix flake check' for generic hosts with no
   # hardware-configuration.nix or fileSystem config.
