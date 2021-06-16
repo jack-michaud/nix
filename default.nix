@@ -25,7 +25,10 @@ with lib.my;
         registryInputs = mapAttrs (_: v: { flake = v; }) filteredInputs;
     in {
       package = pkgs.nixFlakes;
-      extraOptions = "experimental-features = nix-command flakes";
+      extraOptions = ''
+        experimental-features = nix-command flakes
+        builders-use-substitutes = true
+      '';
       # Fix for https://github.com/NixOS/nixpkgs/issues/124215
       sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
       nixPath = nixPathInputs ++ [
@@ -41,6 +44,17 @@ with lib.my;
         "jack-michaud-ajax.cachix.org-1:/AsBHtSL31exwTiTTnyPBiDA00HE+BkBAnl7NiwRQpw="
       ];
       registry = registryInputs // { dotfiles.flake = inputs.self; };
+
+      # Remote builds
+      buildMachines = [ {
+        hostName = "192.168.0.95";
+        system = "aarch64-linux";
+        maxJobs = 4;
+        speedFactor = 2;
+        supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+        mandatoryFeatures = [];
+      } ];
+      distributedBuilds = true;
       
     } // (if !isDarwin then {
       autoOptimiseStore = true;
