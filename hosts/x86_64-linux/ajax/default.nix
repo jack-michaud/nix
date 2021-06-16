@@ -8,7 +8,6 @@
   config = {
     networking = {
       hostName = "ajax"; # Define your hostname.
-      nameservers = [ "192.168.0.250" "1.1.1.1" ];
     };
 
     # Set your time zone.

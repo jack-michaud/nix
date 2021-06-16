@@ -94,4 +94,7 @@ with lib.my;
       systemd-boot.enable = mkDefault true;
     };
   };
+
+  # DNS servers
+  networking.nameservers = mkDefault [ "192.168.0.250" "1.1.1.1" ];
 })
