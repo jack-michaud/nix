@@ -23,12 +23,13 @@
       inputs.nixpkgs-master.follows = "nixpkgs-git";
     };
 
+    deploy-rs.url = "github:serokell/deploy-rs";
 
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin, doom-emacs, kyle-sferrazza-nix, ... }:
+  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin, doom-emacs, kyle-sferrazza-nix, deploy-rs, ... }:
     let 
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays: import pkgs {
@@ -74,7 +75,28 @@
         mapHosts ./hosts/x86_64-linux "x86_64-linux" {} //
         mapHosts ./hosts/aarch64-linux "aarch64-linux" {};
 
+      deploy.nodes.familypi = {
+        sshUser = "root";
+        hostname = "aarch64-builder";
+        profiles.system = {
+          user = "root";
+          path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+        };
+      };
+      # deploy-rs post deploy checks:
+      # This is highly advised, and will prevent many possible mistakes
+      checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
+
       darwinConfigurations = 
         mapHosts ./hosts/x86_64-darwin "x86_64-darwin" {} // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {};
+
+      devShell.x86_64-linux = let 
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      in pkgs.mkShell {
+        buildInputs = [ 
+          # get nixops from github
+          deploy-rs.defaultPackage.x86_64-linux
+        ];
+      };
     };
 }
