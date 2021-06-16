@@ -75,12 +75,22 @@
         mapHosts ./hosts/x86_64-linux "x86_64-linux" {} //
         mapHosts ./hosts/aarch64-linux "aarch64-linux" {};
 
-      deploy.nodes.familypi = {
-        sshUser = "root";
-        hostname = "aarch64-builder";
-        profiles.system = {
-          user = "root";
-          path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+      deploy.nodes = {
+        familypi = {
+          sshUser = "root";
+          hostname = "aarch64-builder";
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+          };
+        };
+
+        ajax = {
+          hostname = "localhost";
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.ajax;
+          };
         };
       };
       # deploy-rs post deploy checks:
