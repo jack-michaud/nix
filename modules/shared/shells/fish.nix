@@ -21,6 +21,7 @@ in {
         alias dcp="docker-compose ps"
         alias dcr="docker-compose restart"
         alias dce="docker-compose exec"
+        alias scratchdir="cd (mktemp -d /tmp/scratch.XXX)"
 
         # cd into a Code directory
         alias coad="cd (find ${config.dotfiles.codeDir} -maxdepth 3 | fzf)"
