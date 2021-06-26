@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 {
   imports =
     [ # Include the results of the hardware scan.
@@ -29,7 +29,7 @@
     # };
 
     # Open ports in the firewall.
-    # networking.firewall.allowedUDPPorts = [ ... ];
+    networking.firewall.allowedTCPPorts = [ 8200 ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
 
@@ -40,6 +40,17 @@
     # Before changing this value read the documentation for this option
     # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
     #system.stateVersion = "20.09"; # Did you read the comment?
+    services.consul = {
+      enable = true;
+      extraConfig = {
+        bootstrap_expect = 1;
+        server = true;
+      };
+      interface = {
+        bind = "wlp4s0";
+        advertise = "wlp4s0";
+      };
+    };
   };
 
   config.modules = {
@@ -88,6 +99,10 @@
     services = {
       syncthing.enable = true;
       ssh.enable = true;
+      vault = {
+        enable = true;
+        address = "192.168.0.7:8200";
+      };
     };
     wireless.enable = true;
     tools.wireguard.enable = true;
