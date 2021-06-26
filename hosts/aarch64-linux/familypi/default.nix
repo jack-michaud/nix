@@ -12,9 +12,38 @@
 
   config = {
 
-    # Enable the X11 windowing system.
-    services.xserver = {
-      enable = false;
+    services.nginx = {
+      enable = true;
+      virtualHosts = {
+        "internal.lomz.me" = {
+          forceSSL = true;
+          root = "/var/www/internal.lomz.me";
+          useACMEHost = "internal.lomz.me";
+        };
+        "docs.internal.lomz.me" = {
+          forceSSL = true;
+          root = "${pkgs.nix.doc}/share/doc/nix/manual";
+          useACMEHost = "internal.lomz.me";
+        };
+        "vault.internal.lomz.me" = {
+          forceSSL = true;
+          locations."/" = {
+            proxyPass = "http://192.168.0.7:8200";
+          };
+          useACMEHost = "internal.lomz.me";
+        };
+      };
+    };
+    security.acme = {
+      acceptTerms = true;
+      email = "jack@lomz.me";
+      certs."internal.lomz.me" = {
+        domain = "*.internal.lomz.me";
+        extraDomainNames = [ "internal.lomz.me" ];
+        dnsProvider = "route53";
+        group = "nginx";
+        credentialsFile = "/run/secrets/familypi/environment";
+      };
     };
 
     # The global useDHCP flag is deprecated, therefore explicitly set to false here.
@@ -23,6 +52,7 @@
     networking.useDHCP = false;
     networking.interfaces.eth0.useDHCP = true;
     networking.interfaces.wlan0.useDHCP = true;
+    networking.firewall.allowedTCPPorts = [ 80 443 ];
 
     #hardware.raspberry-pi."4".fkms-3d.enable = true;
 
@@ -33,6 +63,16 @@
     # Before changing this value read the documentation for this option
     # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
     system.stateVersion = "21.05"; # Did you read the comment?
+    vault-secrets = {
+      secrets = {
+        familypi = {
+          namespace = "hosts";
+          environmentKey = "production";
+          environmentFile = "/root/vault-secrets.sh";
+          services = ["acme-internal.lomz.me"];
+        };
+      };
+    };
   };
 
 
@@ -41,9 +81,8 @@
     editors.nvim.enable = true;
     shells.fish.enable = true;
     services.ssh.enable = true;
+    dev.podman.enable = true;
   };
-
-
 
 }
 
