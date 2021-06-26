@@ -118,7 +118,7 @@ let
 
         group = mkOption {
           type = with types; nullOr str;
-          default = "nobody";
+          default = cfg.secretsGroup;
           example = "gitlab-runner";
           description = ''
             Group that should own the secrets files.
@@ -141,6 +141,14 @@ in
         default = "kv";
         description = ''
           Base Vault KV path to prepend to all KV paths, including the mount point.
+        '';
+      };
+
+      secretsGroup = mkOption {
+        type = with types; str;
+        default = "secrets";
+        description = ''
+          The group that's created that will have access to secrets by default.
         '';
       };
 
@@ -188,6 +196,9 @@ in
   };
 
   config = {
+    users.groups.${cfg.secretsGroup} = {};
+    user.extraGroups = [cfg.secretsGroup];
+
     systemd.services = lib.mkMerge ([(flip mapAttrs' cfg.secrets (
       name: scfg: with scfg;
       let
@@ -243,6 +254,9 @@ in
           ${extraScript}
 
           chown -R "${user}:${group}" "${secretsPath}"
+          chmod -R "660" "${secretsPath}"
+          # +x on the directory
+          chmod "770" "${secretsPath}"
         '';
 
         serviceConfig = {
