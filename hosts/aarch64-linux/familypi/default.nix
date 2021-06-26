@@ -80,7 +80,10 @@
     raspberrypi4.enable = true;
     editors.nvim.enable = true;
     shells.fish.enable = true;
-    services.ssh.enable = true;
+    services = {
+      nextcloud.enable = true;
+      ssh.enable = true;
+    }
     dev.podman.enable = true;
   };
 
