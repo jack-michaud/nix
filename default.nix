@@ -88,6 +88,7 @@ with lib.my;
   # Use the latest kernel
   boot = {
     kernelPackages = mkDefault pkgs.linuxPackages_5_10;
+    tmpOnTmpfs = mkDefault true;
     loader = {
       efi.canTouchEfiVariables = mkDefault true;
       systemd-boot.configurationLimit = 10;

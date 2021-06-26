@@ -15,8 +15,8 @@ in {
 
     boot = {
       kernelPackages = pkgs.linuxPackages_rpi4;
-      tmpOnTmpfs = true;
       initrd.availableKernelModules = [ "usbhid" "usb_storage" ];
+      tmpOnTmpfs = false; # Low ram systems have trouble building (no space left)
       kernelParams = [
         "8250.nr_uarts=1"
         "console=ttyAMA0,115200"
