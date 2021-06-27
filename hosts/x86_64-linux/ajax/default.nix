@@ -114,6 +114,13 @@
         enable = true;
         address = "192.168.0.7:8200";
       };
+      duplicati = {
+        enable = true;
+        parameters = ''
+          --verbose=true
+          --webservice-port=8201
+        '';
+      };
     };
     wireless.enable = true;
     tools.wireguard.enable = true;
