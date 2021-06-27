@@ -85,6 +85,7 @@
       ssh.enable = true;
     };
     dev.arion.enable = true;
+    dev.docker.enable = true;
   };
 
 }

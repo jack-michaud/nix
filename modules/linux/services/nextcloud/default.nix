@@ -20,7 +20,7 @@ in {
     users.groups.nextcloud = {};
     users.users.nextcloud = {
       isSystemUser = true;
-      extraGroups = ["secrets" "podman"];
+      extraGroups = ["secrets" "docker"];
     };
     systemd.services.nextcloud = let 
       arionCompose = pkgs.arion.build { modules = [ (import ./_arion-compose.nix { port = cfg.port; }) ]; inherit pkgs; };
@@ -47,8 +47,9 @@ in {
         nextcloud = {
           namespace = "services";
           environmentKey = "production";
-          environmentFile = "/tmp/vault-secrets.sh";
-          group = "secrets";
+          environmentFile = "/root/vault-secrets.sh";
+          group = "nextcloud";
+          user = "nextcloud";
         };
       };
     };
