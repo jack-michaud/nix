@@ -83,8 +83,8 @@
     services = {
       nextcloud.enable = true;
       ssh.enable = true;
-    }
-    dev.podman.enable = true;
+    };
+    dev.arion.enable = true;
   };
 
 }
