@@ -51,6 +51,17 @@
         advertise = "wlp4s0";
       };
     };
+
+    vault-secrets = {
+      secrets = {
+        ajax = {
+          namespace = "hosts";
+          environmentFile = "/root/vault-secrets.sh";
+          user = config.user.name;
+          group = "nobody";
+        };
+      };
+    };
   };
 
   config.modules = {
