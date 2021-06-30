@@ -11,6 +11,10 @@ in {
   config = mkIf cfg.enable {
     env.EDITOR = "nvim";
 
+    environment.systemPackages = [
+      pkgs.ag
+    ];
+
     home.programs.neovim = {
       enable = true;
       viAlias = true;
@@ -30,6 +34,7 @@ in {
         # languages
         vim-nix
         vim-fish
+        vim-monokai-pro
         rust-vim
         pkgs.nodePackages.coc-rust-analyzer
       ];
