@@ -31,7 +31,7 @@ in {
         };
         colors = {
           primary = {
-            background = "#272822";
+            background = "#2D2A2E";
             foreground = "#f1ebeb";
           };
         };
