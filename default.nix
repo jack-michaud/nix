@@ -75,7 +75,9 @@ with lib.my;
     ranger
     nodejs
     gcc
-  ];
+  ] ++ (builtins.attrValues (import ./utilScripts {
+    inherit pkgs;
+  }));
 } // (if isDarwin then {
   system.stateVersion = 4;
 } else {
