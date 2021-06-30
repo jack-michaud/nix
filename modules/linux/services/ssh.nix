@@ -25,11 +25,5 @@ in {
         "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADtu5UDZalYPNDPW2cJVu/6T+DbwYDKNT9eCsvEuy8Lh4HC9UOywhXvEc/2qs5oPdqw2S3SmxZkq6DhB6PI5Q10GQGv7+Czntrtlas9qvAKxH9Uu8UcXeshFhvmng8JU9n+4KLysGNo6gA6W/Cjp8z45nJFJs2xgjF9qgwiuQV+ZD/W1w== jack@ajax"
       ];
     };
-    networking = {
-      firewall = {
-        enable = true;
-        allowedTCPPorts = [ 22 ];
-      };
-    };
   };
 }

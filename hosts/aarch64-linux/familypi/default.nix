@@ -52,7 +52,7 @@
     networking.useDHCP = false;
     networking.interfaces.eth0.useDHCP = true;
     networking.interfaces.wlan0.useDHCP = true;
-    networking.firewall.allowedTCPPorts = [ 80 443 ];
+    networking.firewall.allowedTCPPorts = [ 22 80 443 ];
 
     #hardware.raspberry-pi."4".fkms-3d.enable = true;
 

@@ -29,7 +29,10 @@
     # };
 
     # Open ports in the firewall.
-    networking.firewall.allowedTCPPorts = [ 8200 ];
+    networking.firewall.allowedTCPPorts = [ 
+      22 # ssh
+      8200 # vault
+    ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
 
