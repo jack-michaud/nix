@@ -87,9 +87,8 @@ with lib.my;
   # hardware-configuration.nix or fileSystem config.
   fileSystems."/".device = mkDefault "/dev/disk/by-label/nixos";
 
-  # Use the latest kernel
   boot = {
-    kernelPackages = mkDefault pkgs.linuxPackages_5_10;
+    kernelPackages = mkDefault pkgs.linuxPackages_5_12;
     tmpOnTmpfs = mkDefault true;
     loader = {
       efi.canTouchEfiVariables = mkDefault true;
