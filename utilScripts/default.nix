@@ -1,6 +1,6 @@
 { pkgs, ...  }:
 with pkgs;
-{
+rec {
   # All of these scripts are added to systemPackages!
   nixos-rebuild-switch = writeShellScriptBin "nixos-rebuild-switch" ''
     # I want this to work, but no clue how.
@@ -8,11 +8,12 @@ with pkgs;
     # https://discourse.nixos.org/t/build-nixos-config-without-environment-dependencies-and-have-nixos-option-nixos-rebuild-support/6940/3
   '';
 
-  test-script = writeShellScriptBin "test-script" ''
-    echo 'testo scripto'
+  rofi-ask-pass = writeShellScriptBin "rofi-ask-pass" ''
+    ${rofi}/bin/rofi -dmenu \
+    	-password \
+    	-no-fixed-num-lines \
+    	-p "$(printf "$1" | sed s/://)"
   '';
-
-  spotify-dbus-status = callPackage ./spotify-dbus-spotify.nix {};
 
   snip = writeShellScriptBin "snip" ''
     file=$(mktemp /tmp/screen.XXXX.png)
@@ -22,5 +23,15 @@ with pkgs;
       rm $file
   '';
 
-  use-vpn = callPackage ./use-vpn.nix {};
+  pick = writeShellScriptBin "pick" ''
+    color=$(${colorpicker}/bin/colorpicker --short --one-shot)
+    echo $color | ${xclip}/bin/xclip -sel clipboard
+    ${imagemagick}/bin/convert -size 50x50 xc:$color /tmp/color.png
+    ${libnotify}/bin/notify-send -i /tmp/color.png \
+      "Picked color $color"
+  '';
+
+  use-vpn = callPackage ./use-vpn.nix {
+    inherit rofi-ask-pass;
+  };
 }
