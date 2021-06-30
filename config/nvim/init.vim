@@ -21,6 +21,9 @@ syntax on
 set termguicolors
 colorscheme monokai_pro
 
+" Mouse control
+set mouse=a
+
 " https://thoughtbot.com/blog/faster-grepping-in-vim
 " The Silver Searcher
 if executable('ag')
