@@ -14,6 +14,14 @@ in {
         Port that nextcloud is hosted on.
       '';
     };
+
+    host = mkOption {
+      default = "localhost:${toString cfg.port}";
+      type = types.string;
+      description = ''
+        http host header 
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -23,7 +31,7 @@ in {
       extraGroups = ["secrets" "docker"];
     };
     systemd.services.nextcloud = let 
-      arionCompose = pkgs.arion.build { modules = [ (import ./_arion-compose.nix { port = cfg.port; }) ]; inherit pkgs; };
+      arionCompose = pkgs.arion.build { modules = [ (import ./_arion-compose.nix { port = cfg.port; host = cfg.host; }) ]; inherit pkgs; };
       composeWrapper = pkgs.writeShellScriptBin "composeWrapper" ''
           ${pkgs.docker-compose}/bin/docker-compose -f ${arionCompose} $@
         '';

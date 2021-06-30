@@ -25,6 +25,13 @@
           root = "${pkgs.nix.doc}/share/doc/nix/manual";
           useACMEHost = "internal.lomz.me";
         };
+        "nextcloud.internal.lomz.me" = {
+          forceSSL = true;
+          useACMEHost = "internal.lomz.me";
+          locations."/" = {
+            proxyPass = "http://localhost:8081";
+          };
+        };
         "vault.internal.lomz.me" = {
           forceSSL = true;
           locations."/" = {
@@ -81,7 +88,11 @@
     editors.nvim.enable = true;
     shells.fish.enable = true;
     services = {
-      nextcloud.enable = true;
+      nextcloud = {
+        enable = true;
+        host = "nextcloud.internal.lomz.me";
+        port = 8081;
+      };
       ssh.enable = true;
     };
     dev.arion.enable = true;

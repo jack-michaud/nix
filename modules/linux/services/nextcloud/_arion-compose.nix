@@ -1,4 +1,4 @@
-{ port, ... }: {
+{ port, host, ... }: {
   config = {
 
     services.postgres = {
@@ -21,6 +21,7 @@
         ];
         environment = {
           POSTGRES_HOST = "postgres";
+          OVERWRITEHOST = host;
         };
         depends_on = [ "postgres" ];
       };
