@@ -9,7 +9,7 @@ in {
   };
 
   config = mkIf cfg.enable {
-    user.packages = [ pkgs.logseq ];
+    user.packages = [ pkgs.my.logseq ];
   };
 }
 
