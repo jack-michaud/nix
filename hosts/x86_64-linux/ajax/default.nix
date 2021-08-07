@@ -10,6 +10,10 @@
       hostName = "ajax"; # Define your hostname.
     };
 
+    boot = {
+      kernelPackages =  pkgs.linuxPackages_5_13;
+    };
+
     # Set your time zone.
     time.timeZone = "America/Los_Angeles";
 
@@ -29,9 +33,20 @@
     # };
 
     # Open ports in the firewall.
+    networking.firewall.allowPing = true;
+    networking.firewall.checkReversePath = "loose";
+    networking.firewall.logRefusedPackets = true;
     networking.firewall.allowedTCPPorts = [ 
       22 # ssh
       8200 # vault
+      27036 # steam link 
+      27037 # steam link 
+    ];
+    networking.firewall.allowedUDPPorts = [ 
+      56700
+
+      27031 # steam link 
+      27036 # steam link
     ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
@@ -55,6 +70,10 @@
       };
     };
 
+    environment.systemPackages = [
+      pkgs.wireshark
+    ];
+
     vault-secrets = {
       secrets = {
         ajax = {
@@ -65,6 +84,12 @@
         };
       };
     };
+
+    services.xserver = {
+      enable = true;
+    };
+
+    user.extraGroups = ["wireshark"];
   };
 
   config.modules = {
@@ -76,7 +101,7 @@
       go.enable = true;
     };
     desktop = {
-      sound.enable = true;
+      sound.enable = true; # sound card is broken
       bitwarden-rofi.enable = true;
       terminals = {
         alacritty = {
@@ -98,7 +123,7 @@
         logseq.enable = true;
 
         code.enable = true;
-        # Doom is kinda broken.
+        # Doom is kinda broken without impure and forces a rebuild of all modules
         emacs.enable = false;
 
         email.enable = true;
