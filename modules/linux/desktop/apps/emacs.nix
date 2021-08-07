@@ -19,7 +19,7 @@ in {
         rev = "master";
         sha256 = "0a9df4sg9bq13zvd6cgc1qidmzd9lll55fx25d9frm5fl7jrn561";
       }) {
-        doomPrivateDir = ../../../config/doom.d;
+        doomPrivateDir = ../../../../config/doom.d;
       };
     in [
       doom-emacs
