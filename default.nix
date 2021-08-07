@@ -100,4 +100,5 @@ with lib.my;
 
   # DNS servers
   networking.nameservers = mkDefault [ "192.168.0.250" "1.1.1.1" ];
+  networking.enableIPv6 = true;
 })
