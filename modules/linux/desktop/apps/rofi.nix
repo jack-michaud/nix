@@ -16,6 +16,7 @@ in {
         modi = "drun,emoji,run";
         kb-primary-paste = "Alt+V";
         kb-primary-copy = "Alt+C";
+        show-icons = true;
       };
 
       package = pkgs.rofi.override {
