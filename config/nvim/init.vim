@@ -60,7 +60,8 @@ let g:netrw_banner = 0
 let g:netrw_browse_split = 4
 let g:netrw_winsize = 20
 let g:netrw_altv = 20
-noremap <leader>r :Vexplore<Enter>
+noremap <leader>tf :Vexplore<Enter>
+noremap <leader>r :Vifm<Enter>
 
 " Fuzzy find
 nnoremap <leader>F :Files<enter>
@@ -101,3 +102,4 @@ nmap <silent> <leader>, <Plug>(coc-references)
 xmap <leader>a  <Plug>(coc-codeaction-selected)
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+

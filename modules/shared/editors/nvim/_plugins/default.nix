@@ -1,4 +1,4 @@
-{ pkgs, username, ... }:
+{ pkgs, ... }:
 let
   customPlugin = { repo, owner, rev, sha256 }:
   pkgs.vimUtils.buildVimPlugin {
@@ -8,27 +8,28 @@ let
     };
   };
   custom = map customPlugin [
-    #{
-    #  owner = "vifm";
-    #  repo = "vifm.vim";
-    #  rev = "822ce3f18dbe6d801a3cd135403a828ed2ccb0d6";
-    #  sha256 = "0apf28b569qz4vik23jl0swka37qwmbxxiybfrksy7i1yaq6d38g";
-    #}
+    {
+      owner = "vifm";
+      repo = "vifm.vim";
+      rev = "408476478f899ec56db26da40eae4735712d6ac5";
+      sha256 = "1nqnfbq22650xfdg3q2hf4app8jf5p4922clrnyckls2rvpafgrr";
+    }
   ];
   plugins = with pkgs.vimPlugins; [
     vim-fugitive
     vim-rhubarb
     vim-dispatch
     vim-sneak
-    vim-nix
     fzf-vim
     coc-nvim
+    coc-snippets
+    coc-rust-analyzer
+    # languages
+    vim-nix
+    vim-fish
+    vim-monokai-pro
+    rust-vim
+    pkgs.nodePackages.coc-rust-analyzer
   ] ++ custom;
-in {
-  imports = [
-    ./fzf.nix
-    ./fugitive.nix
-    #./vifm.nix
-  ];
-  home-manager.users."${username}".programs.neovim.plugins = plugins;
-}
+in 
+  { inherit plugins; }
