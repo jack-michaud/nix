@@ -9,8 +9,6 @@ in {
   };
 
   config = mkIf cfg.enable {
-    environment.systemPackages = [
-      pkgs.steam
-    ];
+    programs.steam.enable = true;
   };
 }
