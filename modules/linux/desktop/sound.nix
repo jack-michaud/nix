@@ -1,4 +1,4 @@
-{ config, options, lib, isDarwin, ... }:
+{ config, options, lib, isDarwin, pkgs, ... }:
 
 with lib;
 with lib.my;
@@ -9,7 +9,7 @@ in {
     enable = mkBoolOpt false;
   };
 
-  config = if !isDarwin then (mkIf cfg.enable {
+  config = mkIf cfg.enable {
     assertions = [
       {
         assertion = !isDarwin;
@@ -18,6 +18,10 @@ in {
     ];
     sound.enable = true;
     hardware.pulseaudio.enable = true;
-  }) else {};
+    hardware.pulseaudio.configFile = pkgs.runCommand "default.pa" {} ''
+      sed 's/module-udev-detect$/module-udev-detect tsched=0/' \
+      ${pkgs.pulseaudio}/etc/pulse/default.pa > $out
+    '';
+  };
 }
 
