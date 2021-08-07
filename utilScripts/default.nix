@@ -19,7 +19,7 @@ rec {
     file=$(mktemp /tmp/screen.XXXX.png)
     ${maim}/bin/maim -s $file $@ && \
       ${xclip}/bin/xclip -sel clip -t image/png -i $file && \
-      ${libnotify}/bin/notify-send -i $file "screenship taken" &&
+      ${libnotify}/bin/notify-send -i $file "screenshot taken" &&
       rm $file
   '';
 
