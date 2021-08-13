@@ -121,6 +121,7 @@
         # writing 
         obsidian.enable = true;
         logseq.enable = true;
+        zotero.enable = true;
 
         code.enable = true;
         # Doom is kinda broken without impure and forces a rebuild of all modules
