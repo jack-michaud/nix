@@ -78,3 +78,17 @@
 .modal button:not(.mod-cta):not(.mod-warning) {
   background-color: #392958;
 }
+
+/* Add supercharged links special prefixes */
+a.internal-link[data-link-status$="in-progress"]::before{
+    content: "🔨 "
+}
+a.internal-link[data-link-status$="done"]::before{
+    content: "✅ "
+}
+a.internal-link[data-link-status$="waiting"]::before{
+    content: "⏳ "
+}
+a.internal-link[data-link-status$="todo"]::before{
+    content: "🗓️ "
+}
