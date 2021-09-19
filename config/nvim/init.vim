@@ -101,5 +101,24 @@ nmap <silent> <leader>, <Plug>(coc-references)
 " Example: `<leader>aap` for current paragraph
 xmap <leader>a  <Plug>(coc-codeaction-selected)
 
+nmap <leader>R <Plug>(coc-rename)
+nmap <leader>cn <Plug>(coc-diagnostic-next)
+nmap <leader>cp <Plug>(coc-diagnostic-prev)
+
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 
+" Language specific
+augroup pythoncmds
+  "autocmd!
+  autocmd FileType python nnoremap <buffer> <leader>g t[a.get(<Esc>lmz%a)<Esc>hx`zx?get<Enter>
+  autocmd FileType python iabbrev <buffer> rr return
+  autocmd FileType python iabbrev <buffer> argparser import argparse; parser = argparse.ArgumentParser()
+
+  " Run black on save
+  autocmd BufWritePre *.py execute ':Black'
+augroup END
+
+augroup terraformcmds
+  " Run TerraformFmt on save
+  autocmd BufWritePre *.tf execute ':TerraformFmt'
+augroup END
