@@ -15,7 +15,7 @@ with lib.my;
           ../.   # /default.nix
           (import path)
         ];
-      } else nixosSystem {
+      } else (makeOverridable nixosSystem) {
         inherit system;
         specialArgs = specialArgs // { inherit system; };
         modules = [
