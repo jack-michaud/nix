@@ -11,7 +11,7 @@ in {
   config = mkIf cfg.enable {
     user.packages = with pkgs; [
       obs-studio
-      obs-v4l2sink
+      linuxPackages.v4l2loopback
     ];
   };
 }
