@@ -1,0 +1,12 @@
+{
+  "pyright.enable": true,
+  "python.linting.mypyEnabled": true,
+  "pyright.disableDiagnostics": true,
+  "languageserver": {
+    "terraform": {
+      "command": "terraform-ls",
+      "args": ["serve"],
+      "filetypes": ["terraform"]
+    }
+  }
+}
