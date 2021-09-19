@@ -14,6 +14,7 @@ in {
     environment.systemPackages = [
       pkgs.ag
       pkgs.vifm
+      pkgs.terraform-ls
     ];
 
     home.programs.neovim = {
@@ -26,5 +27,12 @@ in {
       plugins = (pkgs.callPackage ./_plugins/default.nix {}).plugins;
     };
 
+    home.configFile."nvim/coc-settings.json" = {
+      text = readFile ../../../../config/nvim/coc-settings.json;
+    };
+
   };
+
+  # Extra plugin config:
+  imports = [./_plugins/black.nix];
 }
