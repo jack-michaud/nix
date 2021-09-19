@@ -129,7 +129,9 @@
         # Doom is kinda broken without impure and forces a rebuild of all modules
         emacs.enable = false;
 
-        email.enable = true;
+        email.enable = false;
+
+        obs-studio.enable = true;
       };
       sxhkd = {
         enable = true;
