@@ -73,6 +73,7 @@
 
     environment.systemPackages = [
       pkgs.wireshark
+      pkgs.gccStdenv
     ];
 
     vault-secrets = {
