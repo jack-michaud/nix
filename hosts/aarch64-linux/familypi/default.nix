@@ -87,15 +87,15 @@
     raspberrypi4.enable = true;
     editors.nvim.enable = true;
     shells.fish.enable = true;
-    services = {
-      nextcloud = {
-        enable = true;
-        host = "nextcloud.internal.lomz.me";
-        port = 8081;
-      };
-      ssh.enable = true;
-    };
-    dev.arion.enable = true;
+    #services = {
+    #  nextcloud = {
+    #    enable = true;
+    #    host = "nextcloud.internal.lomz.me";
+    #    port = 8081;
+    #  };
+    #  ssh.enable = true;
+    #};
+    #dev.arion.enable = true;
     dev.docker.enable = true;
   };
 

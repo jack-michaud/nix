@@ -42,6 +42,7 @@
       8200 # vault
       27036 # steam link 
       27037 # steam link 
+      5000 # random
     ];
     networking.firewall.allowedUDPPorts = [ 
       56700

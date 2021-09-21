@@ -46,14 +46,16 @@ with lib.my;
       registry = registryInputs // { dotfiles.flake = inputs.self; };
 
       # Remote builds
-      buildMachines = [ {
-        hostName = "192.168.0.95";
-        system = "aarch64-linux";
-        maxJobs = 4;
-        speedFactor = 2;
-        supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
-        mandatoryFeatures = [];
-      } ];
+      buildMachines = [ 
+        #{
+        #  hostName = "192.168.0.95";
+        #  system = "aarch64-linux";
+        #  maxJobs = 4;
+        #  speedFactor = 2;
+        #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+        #  mandatoryFeatures = [];
+        #}
+      ];
       distributedBuilds = true;
       
     } // (if !isDarwin then {
@@ -88,7 +90,7 @@ with lib.my;
   fileSystems."/".device = mkDefault "/dev/disk/by-label/nixos";
 
   boot = {
-    kernelPackages = mkDefault pkgs.linuxPackages_5_12;
+    kernelPackages = mkDefault pkgs.linuxPackages_5_13;
     tmpOnTmpfs = mkDefault true;
     loader = {
       efi.canTouchEfiVariables = mkDefault true;

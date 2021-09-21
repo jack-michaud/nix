@@ -76,14 +76,21 @@
         mapHosts ./hosts/aarch64-linux "aarch64-linux" {};
 
       deploy.nodes = {
-        familypi = {
-          sshUser = "root";
-          hostname = "aarch64-builder";
+        donxt = {
+          hostname = "192.168.101.204";
           profiles.system = {
             user = "root";
-            path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+            path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.donxt;
           };
         };
+        #familypi = {
+        #  sshUser = "root";
+        #  hostname = "aarch64-builder";
+        #  profiles.system = {
+        #    user = "root";
+        #    path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+        #  };
+        #};
 
         ajax = {
           hostname = "localhost";
@@ -92,6 +99,7 @@
             path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.ajax;
           };
         };
+
       };
       # deploy-rs post deploy checks:
       # This is highly advised, and will prevent many possible mistakes
