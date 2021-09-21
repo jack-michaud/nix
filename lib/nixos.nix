@@ -29,7 +29,8 @@ with lib.my;
         ];
       };
 
-  # Assumes dir has configurations of machines in the shape:
+  # Assumes hosts dir has configurations of machines in the shape:
+  # hosts/<system>/<hostname>/default.nix
   mapHosts = dir: system: attrs @ { ... }:
     mapModules dir
       (hostPath: mkHost system hostPath attrs);

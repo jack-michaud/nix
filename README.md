@@ -1,10 +1,12 @@
 # nix
 
-My NixOS configs. Heavy influence from:
+My NixOS configs for cross-platform (`aarch64-darwin`, `aarch64-linux`, `x86_64-linux`, and `x86_64-darwin` configs). 
 
+Uses `deploy-rs` for deploying remote machines.
+
+Heavy influence from:
 - [Henrik Lissner](https://github.com/hlissner/dotfiles/)
 - [Kyle Sferrazza](https://gitlab.com/kylesferrazza/nix/)
-
 
 ## Using on Darwin
 
