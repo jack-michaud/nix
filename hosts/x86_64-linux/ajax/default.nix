@@ -149,7 +149,7 @@
         address = "192.168.0.7:8200";
       };
       duplicati = {
-        enable = true;
+        enable = false;
         parameters = ''
           --verbose=true
           --webservice-port=8201
