@@ -39,13 +39,7 @@
       };
       pkgs = system: mkPkgs system nixpkgs ([ 
         (self.mkOverlay system) 
-      ] ++ (if system == "x86_64-linux" then [
-        (final: prev: {
-          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
-        })
-      ] else []));
-      pkgs' = system: mkPkgs system nixpkgs-git [];
-
+      ]);
       lib = nixpkgs.lib.extend (self: super: {
         # helpful library extensions.
         my = import ./lib {
@@ -57,19 +51,22 @@
     in {
       lib = lib.my;
       mkOverlay = system: final: prev: {
-        unstable = pkgs' system;
+        unstable = mkPkgs system nixpkgs-git [];
         dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
           src = dwm.defaultPackage.${system}.src;
           installPhase = dwm.defaultPackage.${system}.installPhase;
           buildInputs = dwm.defaultPackage.${system}.buildInputs;
         });
         my = self.mkPackages system;
-      };
+      } // (if system == "x86_64-linux" then {
+          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
+        } else {});
 
       mkPackages = system: let
         _pkgs = pkgs system;
       in
         mapModules ./packages (p: _pkgs.callPackage p {});
+      mkPackagesWithOverlays = system: pkgs system;
 
       nixosConfigurations = 
         mapHosts ./hosts/x86_64-linux "x86_64-linux" {} //
@@ -78,6 +75,9 @@
       deploy.nodes = {
         donxt = {
           hostname = "192.168.101.204";
+          sshUser = "root";
+          sshOpts = ["-p 60022"];
+          autoRollback = false;
           profiles.system = {
             user = "root";
             path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.donxt;
