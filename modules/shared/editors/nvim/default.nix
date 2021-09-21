@@ -15,6 +15,7 @@ in {
       pkgs.ag
       pkgs.vifm
       pkgs.terraform-ls
+      pkgs.unstable.nodePackages.coc-rust-analyzer
     ];
 
     home.programs.neovim = {
@@ -24,7 +25,7 @@ in {
       withNodeJs = true;
       withPython3 = true;
       extraConfig = (builtins.readFile "${config.dotfiles.configDir}/nvim/init.vim");
-      plugins = (pkgs.callPackage ./_plugins/default.nix {}).plugins;
+      plugins = (pkgs.unstable.callPackage ./_plugins/default.nix { inherit pkgs; }).plugins;
     };
 
     home.configFile."nvim/coc-settings.json" = {

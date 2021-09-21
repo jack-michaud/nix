@@ -36,7 +36,7 @@ rec {
   };
 
   assumeRole = let
-    awsBin = "${awscli2}/bin/aws";
+    awsBin = "${unstable.awscli2}/bin/aws";
     jqBin = "${jq}/bin/jq";
   in
     writeShellScriptBin "assumeRole" ''

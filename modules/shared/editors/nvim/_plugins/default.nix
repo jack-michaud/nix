@@ -1,8 +1,9 @@
 { pkgs, ... }:
 let
   customPlugin = { repo, owner, rev, sha256 }:
-  pkgs.vimUtils.buildVimPlugin {
-    name = repo;
+  pkgs.unstable.vimUtils.buildVimPlugin {
+    pname = repo;
+    version = "N";
     src = pkgs.fetchFromGitHub {
       inherit owner repo rev sha256;
     };
@@ -21,7 +22,7 @@ let
       sha256 = "0irgqk5rkd8yb5y1sb88w9y05kyz0s7vxvn461mc9a8a6nidbyzw";
     }
   ];
-  plugins = with pkgs.vimPlugins; [
+  plugins = with pkgs.unstable.vimPlugins; [
     vim-fugitive
     vim-rhubarb
     vim-dispatch
@@ -36,7 +37,6 @@ let
     vim-fish
     vim-monokai-pro
     rust-vim
-    pkgs.nodePackages.coc-rust-analyzer
   ] ++ custom;
 in 
   { inherit plugins; }
