@@ -37,7 +37,10 @@
     services.openssh.ports = [ 60022 ];
   
     # Open ports in the firewall.
-    networking.firewall.allowedTCPPorts = [ 60022 8200 80 443 ];
+    networking.firewall.allowedTCPPorts = [
+      60022 8200 80 443
+      config.services.gitea.httpPort
+    ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
   
@@ -49,11 +52,6 @@
     # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
     system.stateVersion = "21.05"; # Did you read the comment?
   
-    users.users.root = {
-      openssh.authorizedKeys.keys = [
-        "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADtu5UDZalYPNDPW2cJVu/6T+DbwYDKNT9eCsvEuy8Lh4HC9UOywhXvEc/2qs5oPdqw2S3SmxZkq6DhB6PI5Q10GQGv7+Czntrtlas9qvAKxH9Uu8UcXeshFhvmng8JU9n+4KLysGNo6gA6W/Cjp8z45nJFJs2xgjF9qgwiuQV+ZD/W1w== jack@ajax"
-      ];
-    };
     services.consul = {
       enable = true;
       extraConfig = {
@@ -71,6 +69,7 @@
           enable = true;
           address = "192.168.101.204:8200";
         };
+        ssh.enable = true;
       };
     };
   
@@ -97,6 +96,11 @@
         credentialsFile = "/run/secrets/donxt/environment";
       };
     };
+    services.gitea = {
+      enable = true;
+      domain = "git.internal.lomz.me";
+      ssh.clonePort = 2222;
+    };
     services.nginx = {
       enable = true;
       virtualHosts = {
@@ -108,6 +112,17 @@
         "docs.internal.lomz.me" = {
           forceSSL = true;
           root = "${pkgs.nix.doc}/share/doc/nix/manual";
+          useACMEHost = "internal.lomz.me";
+        };
+        "git.internal.lomz.me" = {
+          forceSSL = true;
+          locations."/" = {
+            proxyPass = let
+              host = config.services.gitea.httpAddress;
+              port = config.services.gitea.httpPort;
+            in 
+              "http://" + host + ":" + toString port;
+          };
           useACMEHost = "internal.lomz.me";
         };
         "vault.internal.lomz.me" = {
