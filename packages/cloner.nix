@@ -5,7 +5,7 @@ let
     owner = "jack-michaud";
     repo = "cloner";
     rev = "main";
-    sha256 = "0693zz824c3drgxpxw6zxqrgdkqnapa1qhql1dj5sd47wkwnqxr6";
+    sha256 = "1cwwivdj2bahdcxmzczlk80hq6mmwz1r4260y2k1vkgjpf2qydvx";
   };
 in 
   rustPlatform.buildRustPackage {

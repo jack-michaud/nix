@@ -81,14 +81,49 @@
 
 /* Add supercharged links special prefixes */
 a.internal-link[data-link-status$="in-progress"]::before{
-    content: "🔨 "
+  content: "🔨 "
 }
 a.internal-link[data-link-status$="done"]::before{
-    content: "✅ "
+  content: "✅ "
 }
 a.internal-link[data-link-status$="waiting"]::before{
-    content: "⏳ "
+  content: "⏳ "
 }
 a.internal-link[data-link-status$="todo"]::before{
-    content: "🗓️ "
+  content: "🗓️ "
 }
+
+.markdown-preview-view blockquote {
+  padding: 10px 20px;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  border-style: solid !important;
+  border-color: var(--interactive-accent) !important;
+  border-left: 5px;
+  border-top: 0px;
+  border-right: 0px;
+  border-bottom: 0px;
+
+  &.paraphrase {
+    border-left: 2px;
+    border-top: 2px;
+    border-right: 2px;
+    border-bottom: 2px;
+    border-radius: 8px;
+  }
+  p::before,
+  p::after {
+     content: "“";
+     font-family: Georgia;
+     font-size: 2rem;
+     margin-left: -1rem;
+     margin-top: -0.5rem;
+     position: absolute;
+     opacity: 0.5;
+  }
+  p::after {
+     content: "”";
+     margin: -0.5rem -4rem 0 0;
+  }
+}
+

@@ -77,6 +77,7 @@ with lib.my;
     ranger
     nodejs
     gcc
+    htop
   ] ++ (builtins.attrValues (import ./utilScripts {
     inherit pkgs;
   }));
@@ -90,7 +91,7 @@ with lib.my;
   fileSystems."/".device = mkDefault "/dev/disk/by-label/nixos";
 
   boot = {
-    kernelPackages = mkDefault pkgs.linuxPackages_5_13;
+    kernelPackages = mkDefault pkgs.linuxPackages_5_14;
     tmpOnTmpfs = mkDefault true;
     loader = {
       efi.canTouchEfiVariables = mkDefault true;

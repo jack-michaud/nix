@@ -15,7 +15,7 @@ in {
       enable = true;
 
       keybindings = {
-        "super + w" = "${pkgs.firefox}/bin/firefox";
+        "super + w" = "${pkgs.unstable.google-chrome}/bin/google-chrome-stable";
         "super + a" = "${pkgs.pavucontrol}/bin/pavucontrol";
         "super + n" = "${pkgs.gnome3.networkmanagerapplet}/bin/nm-connection-editor";
         "super + x" = "${pkgs.betterlockscreen}/bin/betterlockscreen -l dim";

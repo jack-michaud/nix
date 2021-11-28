@@ -18,5 +18,8 @@ with lib.my;
     ];
 
     home.file.".Xresources".source = "${config.dotfiles.configDir}/x/Xresources";
+
+    # Enables gnome keyring to unlock on login.
+    security.pam.services.jack.enableGnomeKeyring = true;
   };
 }

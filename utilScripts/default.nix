@@ -19,8 +19,7 @@ rec {
     file=$(mktemp /tmp/screen.XXXX.png)
     ${maim}/bin/maim -s $file $@ && \
       ${xclip}/bin/xclip -sel clip -t image/png -i $file && \
-      ${libnotify}/bin/notify-send -i $file "screenshot taken" &&
-      rm $file
+      ${libnotify}/bin/notify-send -i $file "screenshot taken"
   '';
 
   pick = writeShellScriptBin "pick" ''
@@ -49,5 +48,28 @@ rec {
       export AWS_SECRET_ACCESS_KEY=$(echo $role | ${jqBin} -r '.Credentials.SecretAccessKey')
       export AWS_SESSION_TOKEN=$(echo $role | ${jqBin} -r '.Credentials.SessionToken')
       EOF
+    '';
+
+  makeSSMParameter = let
+    awsBin = "${unstable.awscli2}/bin/aws";
+  in 
+    writeShellScriptBin "makeSSMParameter" ''
+      name=$1
+      value=$2
+
+      if [ -z $name ] || [ -z $value ]; then
+        echo 'Must provide name and value'
+        echo "usage: $0 <name> <value>"
+        exit 1
+      fi
+      tempfile=$(mktemp).json
+      cat <<EOF > $tempfile
+        {"Value": "$value"}
+      EOF
+
+      ${awsBin} ssm put-parameter --name "$name" \
+        --type SecureString \
+        --cli-input-json file://$tempfile
+      rm $tempfile
     '';
 }
