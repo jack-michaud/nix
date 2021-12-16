@@ -1,4 +1,4 @@
-{ options, config, lib, ... }:
+{ options, config, lib, pkgs, ... }:
 with lib;
 with lib.my;
 let cfg = config.modules.services.tailscale;
@@ -11,5 +11,8 @@ in {
     services.tailscale = {
       enable = true;
     };
+    environment.systemPackages = [
+      pkgs.tailscale
+    ];
   };
 }
