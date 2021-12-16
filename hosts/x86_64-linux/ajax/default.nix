@@ -64,17 +64,17 @@
     # Before changing this value read the documentation for this option
     # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
     #system.stateVersion = "20.09"; # Did you read the comment?
-    services.consul = {
-      enable = true;
-      extraConfig = {
-        bootstrap_expect = 1;
-        server = true;
-      };
-      interface = {
-        bind = "wlp4s0";
-        advertise = "wlp4s0";
-      };
-    };
+    #services.consul = {
+    #  enable = true;
+    #  extraConfig = {
+    #    bootstrap_expect = 1;
+    #    server = true;
+    #  };
+    #  interface = {
+    #    bind = "wlp4s0";
+    #    advertise = "wlp4s0";
+    #  };
+    #};
 
     environment.systemPackages = [
       pkgs.wireshark
@@ -82,16 +82,16 @@
       pkgs.sshfs
     ];
 
-    vault-secrets = {
-      secrets = {
-        ajax = {
-          namespace = "hosts";
-          environmentFile = "/root/vault-secrets.sh";
-          user = config.user.name;
-          group = "nobody";
-        };
-      };
-    };
+    #vault-secrets = {
+    #  secrets = {
+    #    ajax = {
+    #      namespace = "hosts";
+    #      environmentFile = "/root/vault-secrets.sh";
+    #      user = config.user.name;
+    #      group = "nobody";
+    #    };
+    #  };
+    #};
 
     services.xserver = {
       enable = true;
@@ -107,6 +107,7 @@
       cloner.enable = true;
       python.enable = true;
       go.enable = true;
+      machine-learning.enable = true;
     };
     desktop = {
       sound.enable = true; # sound card is broken
@@ -151,10 +152,11 @@
     services = {
       syncthing.enable = true;
       ssh.enable = true;
-      vault = {
-        enable = true;
-        address = "192.168.0.7:8200";
-      };
+      tailscale.enable = true;
+      #vault = {
+      #  enable = true;
+      #  address = "192.168.0.7:8200";
+      #};
       duplicati = {
         enable = false;
         parameters = ''
