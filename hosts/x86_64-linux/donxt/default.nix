@@ -39,7 +39,6 @@
     # Open ports in the firewall.
     networking.firewall.allowedTCPPorts = [
       60022 8200 80 443
-      config.services.gitea.httpPort
     ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
@@ -99,7 +98,11 @@
     services.gitea = {
       enable = true;
       domain = "git.internal.lomz.me";
-      ssh.clonePort = 2222;
+      rootUrl = "https://git.internal.lomz.me";
+      ssh = {
+        enable = true;
+        clonePort = 60022;
+      };
     };
     services.nginx = {
       enable = true;
