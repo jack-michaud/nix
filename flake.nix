@@ -18,7 +18,7 @@
     emacs-overlay.url = "github:nix-community/emacs-overlay";
 
     kyle-sferrazza-nix = {
-      url = "https://gitlab.com/kylesferrazza/nix/-/archive/main/nix-main.tar.gz";
+      url = "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.nixpkgs-master.follows = "nixpkgs-git";
     };
