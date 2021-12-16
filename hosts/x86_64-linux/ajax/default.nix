@@ -12,7 +12,7 @@
     };
 
     boot = {
-      kernelPackages =  pkgs.linuxPackages_5_14;
+      kernelPackages =  pkgs.linuxPackages_5_15;
       kernelParams = [
         # https://discourse.nixos.org/t/browsers-unbearably-slow-after-update/9414/31
         "intel_pstate=active"

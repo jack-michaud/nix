@@ -90,7 +90,7 @@ with lib.my;
   fileSystems."/".device = mkDefault "/dev/disk/by-label/nixos";
 
   boot = {
-    kernelPackages = mkDefault pkgs.linuxPackages_5_14;
+    kernelPackages = mkDefault pkgs.linuxPackages_5_15;
     tmpOnTmpfs = mkDefault true;
     loader = {
       efi.canTouchEfiVariables = mkDefault true;
