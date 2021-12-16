@@ -76,7 +76,7 @@ noremap <leader>gb  :Gbrowse<Enter>
 "  - Press "-" on a hunk or visual selection to stage/unstage
 "  - "cvc" to commit verbosely
 noremap <leader>gs  :Git<Enter>
-noremap <leader>gl  :Glog<Enter>
+noremap <leader>gl  :Gclog<Enter>
 
 "" Coc-snippets
 " Use <C-l> for trigger snippet expand.
