@@ -131,7 +131,6 @@
 
         # writing 
         obsidian.enable = true;
-        logseq.enable = true;
         zotero.enable = true;
 
         code.enable = true;
