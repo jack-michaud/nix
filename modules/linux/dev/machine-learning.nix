@@ -10,7 +10,7 @@ in {
 
   config = mkIf cfg.enable {
     environment.systemPackages = [
-      python39Packages.pyopengl
+      pkgs.python39Packages.pyopengl
     ];
   };
 }
