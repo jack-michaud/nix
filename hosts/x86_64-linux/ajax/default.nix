@@ -101,6 +101,7 @@
   };
 
   config.modules = {
+    utils.enable = true;
     dev = {
       docker.enable = true;
       git.enable = true;

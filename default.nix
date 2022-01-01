@@ -77,9 +77,7 @@ with lib.my;
     nodejs
     gcc
     htop
-  ] ++ (builtins.attrValues (import ./utilScripts {
-    inherit pkgs;
-  }));
+  ];
 } // (if isDarwin then {
   system.stateVersion = 4;
 } else {
