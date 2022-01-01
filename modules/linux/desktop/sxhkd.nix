@@ -19,10 +19,14 @@ in {
         "super + a" = "${pkgs.pavucontrol}/bin/pavucontrol";
         "super + n" = "${pkgs.gnome3.networkmanagerapplet}/bin/nm-connection-editor";
         "super + x" = "${pkgs.betterlockscreen}/bin/betterlockscreen -l dim";
+        "ctrl + space" = "${pkgs.dunst}/bin/dunstctl close";
+        "ctrl + shift + space" = "${pkgs.dunst}/bin/dunstctl close-all";
 
         # Brightness
         "F5" = "/run/current-system/sw/bin/light -U 5";
+        "shift + F5" = "/run/current-system/sw/bin/light -U 1";
         "F6" = "/run/current-system/sw/bin/light -A 5";
+        "shift + F6" = "/run/current-system/sw/bin/light -A 1";
       };
     };
   };
