@@ -69,6 +69,7 @@
           address = "192.168.101.204:8200";
         };
         ssh.enable = true;
+        tailscale.enable = true;
       };
     };
   
