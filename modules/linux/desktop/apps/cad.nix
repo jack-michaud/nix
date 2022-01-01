@@ -9,9 +9,10 @@ in {
   };
 
   config = mkIf cfg.enable {
-    environment.systemPackages = [
-      pkgs.freecad
-      pkgs.prusa-slicer
+    environment.systemPackages = with pkgs; [
+      freecad
+      openscad
+      prusa-slicer
     ];
   };
 }
