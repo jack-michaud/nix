@@ -47,13 +47,21 @@ with lib.my;
       # Remote builds
       buildMachines = [ 
         {
-          hostName = "donxt";
-          system = "x86_64-linux";
+          hostName = "aarch64-builder";
+          system = "aarch64-linux";
           maxJobs = 4;
           speedFactor = 2;
           supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
           mandatoryFeatures = [];
         }
+        #{
+        #  hostName = "donxt";
+        #  system = "x86_64-linux";
+        #  maxJobs = 4;
+        #  speedFactor = 2;
+        #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+        #  mandatoryFeatures = [];
+        #}
       ];
       distributedBuilds = true;
       

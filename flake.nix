@@ -83,14 +83,14 @@
             path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.donxt;
           };
         };
-        #familypi = {
-        #  sshUser = "root";
-        #  hostname = "aarch64-builder";
-        #  profiles.system = {
-        #    user = "root";
-        #    path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
-        #  };
-        #};
+        familypi = {
+          sshUser = "root";
+          hostname = "aarch64-builder";
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.familypi;
+          };
+        };
 
         ajax = {
           hostname = "localhost";

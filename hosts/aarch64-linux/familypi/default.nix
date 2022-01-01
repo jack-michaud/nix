@@ -12,47 +12,6 @@
 
   config = {
 
-    services.nginx = {
-      enable = true;
-      virtualHosts = {
-        "internal.lomz.me" = {
-          forceSSL = true;
-          root = "/var/www/internal.lomz.me";
-          useACMEHost = "internal.lomz.me";
-        };
-        "docs.internal.lomz.me" = {
-          forceSSL = true;
-          root = "${pkgs.nix.doc}/share/doc/nix/manual";
-          useACMEHost = "internal.lomz.me";
-        };
-        "nextcloud.internal.lomz.me" = {
-          forceSSL = true;
-          useACMEHost = "internal.lomz.me";
-          locations."/" = {
-            proxyPass = "http://localhost:8081";
-          };
-        };
-        "vault.internal.lomz.me" = {
-          forceSSL = true;
-          locations."/" = {
-            proxyPass = "http://192.168.0.7:8200";
-          };
-          useACMEHost = "internal.lomz.me";
-        };
-      };
-    };
-    security.acme = {
-      acceptTerms = true;
-      email = "jack@lomz.me";
-      certs."internal.lomz.me" = {
-        domain = "*.internal.lomz.me";
-        extraDomainNames = [ "internal.lomz.me" ];
-        dnsProvider = "route53";
-        group = "nginx";
-        credentialsFile = "/run/secrets/familypi/environment";
-      };
-    };
-
     # The global useDHCP flag is deprecated, therefore explicitly set to false here.
     # Per-interface useDHCP will be mandatory in the future, so this generated config
     # replicates the default behaviour.
@@ -62,6 +21,15 @@
     networking.firewall.allowedTCPPorts = [ 22 80 443 ];
 
     #hardware.raspberry-pi."4".fkms-3d.enable = true;
+
+    services.octoprint = {
+      enable = true;
+      plugins = plugins: with plugins; [
+        stlviewer printtimegenius
+      ];
+    };
+    boot.kernelModules = [ "bcm2835-v4l2" ];
+
 
     # This value determines the NixOS release from which the default
     # settings for stateful data, like file locations and database versions
@@ -85,18 +53,19 @@
 
   config.modules = {
     raspberrypi4.enable = true;
-    editors.nvim.enable = true;
+    #editors.nvim.enable = true;
     shells.fish.enable = true;
-    #services = {
+    services = {
     #  nextcloud = {
     #    enable = true;
     #    host = "nextcloud.internal.lomz.me";
     #    port = 8081;
     #  };
-    #  ssh.enable = true;
-    #};
+      ssh.enable = true;
+    };
     #dev.arion.enable = true;
-    dev.docker.enable = true;
+    #dev.docker.enable = true;
+    wireless.enable = true;
   };
 
 }
