@@ -54,19 +54,39 @@ nnoremap <leader>P "+P
 vnoremap <leader>p "+p
 vnoremap <leader>P "+P
 
-" File Browser
-let g:netrw_liststyle = 3
-let g:netrw_banner = 0
-let g:netrw_browse_split = 4
-let g:netrw_winsize = 20
-let g:netrw_altv = 20
-noremap <leader>tf :Vexplore<Enter>
-noremap <leader>r :Vifm<Enter>
+" Telescope stuff
+lua << EOF
+local fb_actions = require("telescope").extensions.file_browser.actions
+require('telescope').setup {
+  extensions = {
+    file_browser = {
+      theme = 'dropdown',
+      mappings = {
+        ['i'] = {
+          ['<C-t>'] = fb_actions.change_cwd,
+        },
+        ['n'] = {
+        },
+      },
+    },
+  },
+}
+require('telescope').load_extension('fzf')
+require('telescope').load_extension('file_browser')
+require('telescope').load_extension('gh')
+EOF
 
-" Fuzzy find
-nnoremap <leader>F :Files<enter>
-nnoremap <leader>G :Rg<enter>
-nnoremap <leader>b :Buffers<enter>
+"nnoremap <leader>r :Vifm<enter>
+nnoremap <leader>r :Telescope file_browser<enter>
+"nnoremap <leader>F :Files<enter>
+nnoremap <leader>F :Telescope find_files<enter>
+"nnoremap <leader>G :Rg<enter>
+nnoremap <leader>G :Telescope live_grep<enter>
+"nnoremap <leader>b :Buffers<enter>
+nnoremap <leader>b :Telescope buffers<enter>
+"nnoremap <leader>S :cex system("rg --column ")<Left><Left>
+nnoremap <leader>H :Telescope help_tags<enter>
+
 nnoremap <leader>S :cex system("rg --column ")<Left><Left>
 
 " Opens Git link for selected line or region in browser
