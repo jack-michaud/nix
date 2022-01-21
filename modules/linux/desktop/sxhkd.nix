@@ -16,8 +16,9 @@ in {
 
       keybindings = {
         "super + w" = "${pkgs.unstable.google-chrome}/bin/google-chrome-stable";
+        "super + m" = "${pkgs.spotify}/bin/spotify";
         "super + a" = "${pkgs.pavucontrol}/bin/pavucontrol";
-        "super + n" = "${pkgs.gnome3.networkmanagerapplet}/bin/nm-connection-editor";
+        "super + n" = "${pkgs.networkmanagerapplet}/bin/nm-connection-editor";
         "super + x" = "${pkgs.betterlockscreen}/bin/betterlockscreen -l dim";
         "ctrl + space" = "${pkgs.dunst}/bin/dunstctl close";
         "ctrl + shift + space" = "${pkgs.dunst}/bin/dunstctl close-all";
