@@ -112,6 +112,7 @@
     };
     desktop = {
       sound.enable = true; # sound card is broken
+      bluetooth.enable = true;
       bitwarden-rofi.enable = true;
       terminals = {
         alacritty = {
