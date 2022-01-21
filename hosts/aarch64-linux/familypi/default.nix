@@ -18,18 +18,33 @@
     networking.useDHCP = false;
     networking.interfaces.eth0.useDHCP = true;
     networking.interfaces.wlan0.useDHCP = true;
-    networking.firewall.allowedTCPPorts = [ 22 80 443 ];
+    networking.firewall.allowedTCPPorts = [ 22 80 443 5000 8080 ];
 
     #hardware.raspberry-pi."4".fkms-3d.enable = true;
 
     services.octoprint = {
       enable = true;
+      port = 5000;
       plugins = plugins: with plugins; [
         stlviewer printtimegenius
       ];
+      extraConfig = {
+        reverseProxy = {
+          trustedDownstream = ["192.168.101.204"];
+        };
+      };
     };
     boot.kernelModules = [ "bcm2835-v4l2" ];
 
+
+    systemd.services.streamer = {
+      wantedBy = ["multi-user.target"];
+      description = "A stream of the CSI camera attached to my 3d printer";
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${pkgs.mjpg-streamer}/bin/mjpg_streamer -i 'input_uvc.so -d /dev/video0 -r 1280x720' -o 'output_http.so -p 8080'";
+      };
+    };
 
     # This value determines the NixOS release from which the default
     # settings for stateful data, like file locations and database versions

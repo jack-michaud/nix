@@ -34,6 +34,19 @@ in {
     boot.loader.grub.enable = false;
     boot.loader.generic-extlinux-compatible.enable = true;
 
+    # These two parameters are the important ones to get the
+    # camera working. 
+    # This option actually doesn't work to append things to /boot/config.txt. 
+    # https://github.com/NixOS/nixpkgs/issues/67792
+    # You can manually update the config.txt by mounting the firmware and updating the config manually.
+    # mount /dev/disk/by-label/FIRMWARE /mnt
+    # cat /mnt/config.txt
+    boot.loader.raspberryPi.firmwareConfig = ''
+      start_x=1
+      gpu_mem=128
+    '';
+
+
     # Required for the Wireless firmware
     hardware.enableRedistributableFirmware = true;
 

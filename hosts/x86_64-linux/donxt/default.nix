@@ -136,6 +136,24 @@
           };
           useACMEHost = "internal.lomz.me";
         };
+        "skweuss.internal.lomz.me" = {
+          forceSSL = true;
+          locations."/" = {
+            proxyPass = "http://192.168.0.22:5000";
+            proxyWebsockets = true;
+            extraConfig = ''
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Scheme $scheme;
+              client_max_body_size 0;
+            '';
+          };
+          locations."/stream" = {
+            proxyPass = "http://192.168.0.22:8080/";
+          };
+          useACMEHost = "internal.lomz.me";
+        };
       };
     };
   };
