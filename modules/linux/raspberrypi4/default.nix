@@ -32,7 +32,7 @@ in {
       version = 4;
     };
     boot.loader.grub.enable = false;
-    boot.loader.generic-extlinux-compatible.enable = true;
+    boot.loader.systemd-boot.enable = false;
 
     # These two parameters are the important ones to get the
     # camera working. 
