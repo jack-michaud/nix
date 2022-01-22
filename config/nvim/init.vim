@@ -171,3 +171,12 @@ require('nvim-treesitter.configs').setup {
   },
 }
 EOF
+
+lua << EOF
+require('feline').setup()
+EOF
+
+lua << EOF
+require('gitsigns').setup()
+
+EOF

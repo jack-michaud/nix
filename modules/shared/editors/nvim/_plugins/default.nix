@@ -41,7 +41,11 @@ let
     vim-rhubarb
     vim-dispatch
     vim-sneak
+    # neovim packages
     nvim-treesitter
+    feline-nvim
+    plenary-nvim
+    gitsigns-nvim
     # Telescope
     telescope-nvim
     telescope-fzf-native-nvim
