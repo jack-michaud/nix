@@ -41,6 +41,7 @@ let
     vim-rhubarb
     vim-dispatch
     vim-sneak
+    nvim-treesitter
     # Telescope
     telescope-nvim
     telescope-fzf-native-nvim
@@ -48,10 +49,7 @@ let
     coc-nvim
     coc-snippets
     coc-rust-analyzer
-    # languages
-    vim-terraform
-    vim-nix
-    vim-fish
+    # Theme
     vim-monokai-pro
     rust-vim
   ] ++ custom;
