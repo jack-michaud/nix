@@ -64,6 +64,7 @@ require('telescope').setup {
       mappings = {
         ['i'] = {
           ['<C-t>'] = fb_actions.change_cwd,
+          ['<C-r>'] = fb_actions.create,
         },
         ['n'] = {
         },
