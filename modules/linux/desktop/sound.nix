@@ -18,10 +18,6 @@ in {
     ];
     sound.enable = true;
     hardware.pulseaudio.enable = true;
-    hardware.pulseaudio.extraConfig = ''
-      sed 's/module-udev-detect$/module-udev-detect tsched=0/' \
-      ${pkgs.pulseaudio}/etc/pulse/default.pa > $out
-    '';
   };
 }
 
