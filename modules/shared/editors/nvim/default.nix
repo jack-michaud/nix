@@ -13,7 +13,6 @@ in {
 
     environment.systemPackages = [
       pkgs.ag
-      pkgs.vifm
       pkgs.terraform-ls
       pkgs.unstable.nodePackages.coc-rust-analyzer
     ];

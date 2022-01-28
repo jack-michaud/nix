@@ -42,6 +42,7 @@ let
     vim-dispatch
     vim-sneak
     # neovim packages
+    null-ls-nvim
     nvim-treesitter
     feline-nvim
     plenary-nvim

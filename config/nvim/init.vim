@@ -134,14 +134,8 @@ augroup pythoncmds
   autocmd FileType python nnoremap <buffer> <leader>g t[a.get(<Esc>lmz%a)<Esc>hx`zx?get<Enter>
   autocmd FileType python iabbrev <buffer> rr return
   autocmd FileType python iabbrev <buffer> argparser import argparse; parser = argparse.ArgumentParser()
+  autocmd FileType python iabbrev <buffer> importpdb import pdb; pdb.set_trace()
 
-  " Run black on save
-  autocmd BufWritePre *.py execute ':Black'
-augroup END
-
-augroup terraformcmds
-  " Run TerraformFmt on save
-  autocmd BufWritePre *.tf execute ':TerraformFmt'
 augroup END
 
 
@@ -178,5 +172,30 @@ EOF
 
 lua << EOF
 require('gitsigns').setup()
+EOF
 
+lua << EOF
+require("null-ls").setup({
+    sources = {
+        require("null-ls").builtins.formatting.black,
+        require("null-ls").builtins.formatting.dart_format.with({
+          extra_args = {"--line-length=120"}
+        }),
+        require("null-ls").builtins.formatting.nixfmt,
+        require("null-ls").builtins.formatting.gofmt,
+        require("null-ls").builtins.formatting.phpcbf,
+        require("null-ls").builtins.formatting.rustfmt,
+        require("null-ls").builtins.formatting.terraform_fmt,
+    },
+    on_attach = function(client)
+      if client.resolved_capabilities.document_formatting then
+          vim.cmd([[
+          augroup LspFormatting
+            autocmd! * <buffer>
+            autocmd BufWritePre <buffer> lua vim.lsp.buf.formatting_sync()
+
+          ]])
+      end
+    end,
+})
 EOF
