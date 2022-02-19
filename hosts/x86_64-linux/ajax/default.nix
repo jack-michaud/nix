@@ -1,10 +1,8 @@
-{ config, lib, pkgs, ... }:
-{
-  imports =
-    [ # Include the results of the hardware scan.
-      ./hardware-configuration.nix
-      ./containers.nix
-    ];
+{ config, lib, pkgs, ... }: {
+  imports = [ # Include the results of the hardware scan.
+    ./hardware-configuration.nix
+    ./containers.nix
+  ];
 
   config = {
     networking = {
@@ -12,7 +10,7 @@
     };
 
     boot = {
-      kernelPackages =  pkgs.linuxPackages_5_15;
+      kernelPackages = pkgs.linuxPackages_5_15;
       kernelParams = [
         # https://discourse.nixos.org/t/browsers-unbearably-slow-after-update/9414/31
         "intel_pstate=active"
@@ -41,17 +39,17 @@
     networking.firewall.allowPing = true;
     networking.firewall.checkReversePath = "loose";
     networking.firewall.logRefusedPackets = true;
-    networking.firewall.allowedTCPPorts = [ 
+    networking.firewall.allowedTCPPorts = [
       22 # ssh
       8200 # vault
-      27036 # steam link 
-      27037 # steam link 
+      27036 # steam link
+      27037 # steam link
       5000 # random
     ];
-    networking.firewall.allowedUDPPorts = [ 
+    networking.firewall.allowedUDPPorts = [
       56700
 
-      27031 # steam link 
+      27031 # steam link
       27036 # steam link
     ];
     # Or disable the firewall altogether.
@@ -76,11 +74,7 @@
     #  };
     #};
 
-    environment.systemPackages = [
-      pkgs.wireshark
-      pkgs.gccStdenv
-      pkgs.sshfs
-    ];
+    environment.systemPackages = [ pkgs.wireshark pkgs.gccStdenv pkgs.sshfs ];
 
     #vault-secrets = {
     #  secrets = {
@@ -93,11 +87,9 @@
     #  };
     #};
 
-    services.xserver = {
-      enable = true;
-    };
+    services.xserver = { enable = true; };
 
-    user.extraGroups = ["wireshark"];
+    user.extraGroups = [ "wireshark" ];
   };
 
   config.modules = {
@@ -114,11 +106,7 @@
       sound.enable = true; # sound card is broken
       bluetooth.enable = true;
       bitwarden-rofi.enable = true;
-      terminals = {
-        alacritty = {
-          enable = true;
-        };
-      };
+      terminals = { alacritty = { enable = true; }; };
       apps = {
         cad.enable = true;
         firefox.enable = true;
@@ -143,9 +131,7 @@
 
         obs-studio.enable = true;
       };
-      sxhkd = {
-        enable = true;
-      };
+      sxhkd = { enable = true; };
     };
     wms.dwm.enable = true;
     editors.nvim.enable = true;
@@ -171,4 +157,3 @@
     tools.openvpn.enable = true;
   };
 }
-
