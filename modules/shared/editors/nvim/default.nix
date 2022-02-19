@@ -11,10 +11,11 @@ in {
   config = mkIf cfg.enable {
     env.EDITOR = "nvim";
 
-    environment.systemPackages = [
-      pkgs.ag
-      pkgs.terraform-ls
-      pkgs.unstable.nodePackages.coc-rust-analyzer
+    environment.systemPackages = with pkgs; [
+      ag
+      terraform-ls
+      unstable.nodePackages.coc-rust-analyzer
+      nixfmt
     ];
 
     home.programs.neovim = {
