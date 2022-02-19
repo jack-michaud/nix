@@ -32,13 +32,14 @@ with lib.my;
       experimental-features = nix-command flakes
       builders-use-substitutes = true
     '';
-    # Fix for https://github.com/NixOS/nixpkgs/issues/124215
-    sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
+
     nixPath = nixPathInputs ++ [
       "nixpkgs-overlays=${config.dotfiles.dir}/../overlays"
       "dotfiles=${config.dotfiles.dir}"
     ];
     settings = {
+      # Fix for https://github.com/NixOS/nixpkgs/issues/124215
+      extra-sandbox-paths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
       substituters = [
         "https://nix-community.cachix.org"
         "https://jack-michaud-ajax.cachix.org"
