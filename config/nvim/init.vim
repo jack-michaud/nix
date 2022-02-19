@@ -186,6 +186,8 @@ require("null-ls").setup({
         require("null-ls").builtins.formatting.phpcbf,
         require("null-ls").builtins.formatting.rustfmt,
         require("null-ls").builtins.formatting.terraform_fmt,
+
+        require("null-ls").builtins.diagnostics.mypy,
     },
     on_attach = function(client)
       if client.resolved_capabilities.document_formatting then
