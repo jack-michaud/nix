@@ -5,12 +5,16 @@ with lib.my;
 {
   imports =
     # Home manager
-    [ 
-      (if isDarwin then inputs.home-manager.darwinModules.home-manager else inputs.home-manager.nixosModules.home-manager) 
+    [
+      (if isDarwin then
+        inputs.home-manager.darwinModules.home-manager
+      else
+        inputs.home-manager.nixosModules.home-manager)
     ]
     # All my personal modules
-    ++ (mapModulesRec' (toString ./modules/shared) import)
-    ++ (mapModulesRec' (toString (if isDarwin then ./modules/darwin else ./modules/linux)) import);
+    ++ (mapModulesRec' (toString ./modules/shared) import) ++ (mapModulesRec'
+      (toString (if isDarwin then ./modules/darwin else ./modules/linux))
+      import);
 
   # Common config for all nixos machines; and to ensure the flake operates
   # soundly
@@ -18,56 +22,56 @@ with lib.my;
 
   # Configure nix and nixpkgs
   environment.variables.NIXPKGS_ALLOW_UNFREE = "1";
-  nix =
-    let filteredInputs = filterAttrs (n: _: n != "self") inputs;
-        nixPathInputs  = mapAttrsToList (n: v: "${n}=${v}") filteredInputs;
-        registryInputs = mapAttrs (_: v: { flake = v; }) filteredInputs;
-    in {
-      package = pkgs.nixFlakes;
-      extraOptions = ''
-        experimental-features = nix-command flakes
-        builders-use-substitutes = true
-      '';
-      # Fix for https://github.com/NixOS/nixpkgs/issues/124215
-      sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
-      nixPath = nixPathInputs ++ [
-        "nixpkgs-overlays=${config.dotfiles.dir}/../overlays"
-        "dotfiles=${config.dotfiles.dir}"
-      ];
-      binaryCaches = [
+  nix = let
+    filteredInputs = filterAttrs (n: _: n != "self") inputs;
+    nixPathInputs = mapAttrsToList (n: v: "${n}=${v}") filteredInputs;
+    registryInputs = mapAttrs (_: v: { flake = v; }) filteredInputs;
+  in {
+    package = pkgs.nixFlakes;
+    extraOptions = ''
+      experimental-features = nix-command flakes
+      builders-use-substitutes = true
+    '';
+    # Fix for https://github.com/NixOS/nixpkgs/issues/124215
+    sandboxPaths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
+    nixPath = nixPathInputs ++ [
+      "nixpkgs-overlays=${config.dotfiles.dir}/../overlays"
+      "dotfiles=${config.dotfiles.dir}"
+    ];
+    settings = {
+      substituters = [
         "https://nix-community.cachix.org"
         "https://jack-michaud-ajax.cachix.org"
       ];
-      binaryCachePublicKeys = [
+      trusted-public-keys = [
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         "jack-michaud-ajax.cachix.org-1:/AsBHtSL31exwTiTTnyPBiDA00HE+BkBAnl7NiwRQpw="
       ];
-      registry = registryInputs // { dotfiles.flake = inputs.self; };
+    };
+    registry = registryInputs // { dotfiles.flake = inputs.self; };
 
-      # Remote builds
-      buildMachines = [ 
-        {
-          hostName = "aarch64-builder";
-          system = "aarch64-linux";
-          maxJobs = 4;
-          speedFactor = 2;
-          supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
-          mandatoryFeatures = [];
-        }
-        #{
-        #  hostName = "donxt";
-        #  system = "x86_64-linux";
-        #  maxJobs = 4;
-        #  speedFactor = 2;
-        #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
-        #  mandatoryFeatures = [];
-        #}
-      ];
-      distributedBuilds = true;
-      
-    } // (if !isDarwin then {
-      autoOptimiseStore = true;
-    } else {});
+    # Remote builds
+    buildMachines = [
+      #{
+      #  hostName = "aarch64-builder";
+      #  system = "aarch64-linux";
+      #  maxJobs = 4;
+      #  speedFactor = 2;
+      #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+      #  mandatoryFeatures = [];
+      #}
+      #{
+      #  hostName = "donxt";
+      #  system = "x86_64-linux";
+      #  maxJobs = 4;
+      #  speedFactor = 2;
+      #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
+      #  mandatoryFeatures = [];
+      #}
+    ];
+    distributedBuilds = true;
+
+  } // (if !isDarwin then { settings.auto-optimise-store = true; } else { });
   system.configurationRevision = with inputs; mkIf (self ? rev) self.rev;
 
   # Just the bear necessities...
