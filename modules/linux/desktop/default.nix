@@ -1,14 +1,11 @@
 { options, config, lib, pkgs, ... }:
 
 with lib;
-with lib.my;
-{
+with lib.my; {
   config = mkIf config.services.xserver.enable {
     # Configure keymap in X11
     services.xserver.layout = "us";
-    fonts.fonts = [
-      pkgs.font-awesome_5
-    ];
+    fonts.fonts = [ pkgs.font-awesome_5 ];
     environment.systemPackages = with pkgs; [
       xclip
       xbrightness
@@ -17,7 +14,8 @@ with lib.my;
       libnotify
     ];
 
-    home.file.".Xresources".source = "${config.dotfiles.configDir}/x/Xresources";
+    home.file.".Xresources".source =
+      "${config.dotfiles.configDir}/x/Xresources";
 
     # Enables gnome keyring to unlock on login.
     security.pam.services.jack.enableGnomeKeyring = true;
