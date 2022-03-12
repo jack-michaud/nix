@@ -1,15 +1,13 @@
 { pkgs, ... }:
 let
   customPlugin = { repo, owner, rev, sha256 }:
-  pkgs.unstable.vimUtils.buildVimPlugin {
-    pname = repo;
-    version = "N";
-    src = pkgs.fetchFromGitHub {
-      inherit owner repo rev sha256;
+    pkgs.unstable.vimUtils.buildVimPlugin {
+      pname = repo;
+      version = "N";
+      src = pkgs.fetchFromGitHub { inherit owner repo rev sha256; };
+      nativeBuildInputs = [ pkgs.neovim-unwrapped ];
+      HOME = "/tmp/";
     };
-    nativeBuildInputs = [ pkgs.neovim-unwrapped ];
-    HOME = "/tmp/";
-  };
   custom = map customPlugin [
     {
       owner = "vifm";
@@ -35,28 +33,34 @@ let
       rev = "36df6b281eb3cb47494933a3dc44c874086fa688";
       sha256 = "1lra7c38m3amqgdlb4gnl3rnvszwzn0yv624v2h4lhax8nzzq85j";
     }
+    {
+      owner = "github";
+      repo = "copilot.vim";
+      rev = "47eb231463d3654de1a205c4e30567fbd006965d";
+      sha256 = "06znz1869h7cdh9xc0b54mysslgpf3qdwsj5zvnzrzk6fnfin03q";
+    }
   ];
-  plugins = with pkgs.unstable.vimPlugins; [
-    vim-fugitive
-    vim-rhubarb
-    vim-dispatch
-    vim-sneak
-    # neovim packages
-    null-ls-nvim
-    nvim-treesitter
-    feline-nvim
-    plenary-nvim
-    gitsigns-nvim
-    # Telescope
-    telescope-nvim
-    telescope-fzf-native-nvim
-    # Coc
-    coc-nvim
-    coc-snippets
-    coc-rust-analyzer
-    # Theme
-    vim-monokai-pro
-    rust-vim
-  ] ++ custom;
-in 
-  { inherit plugins; }
+  plugins = with pkgs.unstable.vimPlugins;
+    [
+      vim-fugitive
+      vim-rhubarb
+      vim-dispatch
+      vim-sneak
+      # neovim packages
+      null-ls-nvim
+      nvim-treesitter
+      feline-nvim
+      plenary-nvim
+      gitsigns-nvim
+      # Telescope
+      telescope-nvim
+      telescope-fzf-native-nvim
+      # Coc
+      coc-nvim
+      coc-snippets
+      coc-rust-analyzer
+      # Theme
+      vim-monokai-pro
+      rust-vim
+    ] ++ custom;
+in { inherit plugins; }
