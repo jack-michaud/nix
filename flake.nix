@@ -10,84 +10,116 @@
       url = "github:jack-michaud/dwm";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    #emacs = {
+    #  url = "github:jack-michaud/doom.d";
+    #};
+    doom-emacs.url = "github:vlaci/nix-doom-emacs";
+    doom-emacs.inputs.emacs-overlay.follows = "emacs-overlay";
+    emacs-overlay.url = "github:nix-community/emacs-overlay";
+
+    kyle-sferrazza-nix = {
+      url =
+        "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-git";
+    };
+
+    deploy-rs.url = "github:serokell/deploy-rs";
 
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin }:
-    let 
-      mkOverlay = system: import ./overlays {
-        inherit system dwm;
-        nixpkgs = import nixpkgs-git {
+  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
+    , doom-emacs, kyle-sferrazza-nix, deploy-rs, flutter-nix, ... }:
+    let
+      inherit (lib.my) mapModules mapModulesRec mapHosts;
+      mkPkgs = system: pkgs: extraOverlays:
+        import pkgs {
           inherit system;
-          config = { allowUnfree = true; };
+          config.allowUnfree = true;
+          config.android_sdk.accept_license = true;
+          overlays = extraOverlays;
         };
-      };
-      mkUtilScripts = system: import ./utilScripts {
-        pkgs = import nixpkgs-git {
-          inherit system;
-          config = { allowUnfree = true; };
+      pkgs = system: mkPkgs system nixpkgs ([ (self.mkOverlay system) ]);
+      lib = nixpkgs.lib.extend (self: super: {
+        # helpful library extensions.
+        my = import ./lib {
+          inherit pkgs inputs darwin;
+          lib = self;
         };
-      };
-    in rec {
-      nixosConfigurations = let
-        system-config = hostname: username: system:
-        let
-          myoverlay = mkOverlay system;
-          utilScripts = mkUtilScripts system;
-        in {
-          "${hostname}" = nixpkgs.lib.makeOverridable nixpkgs.lib.nixosSystem {
-            inherit system;
-            specialArgs = rec {
-              inherit hostname username utilScripts;
-            };
-            modules = [ 
-              {
-                nixpkgs.overlays = [ myoverlay ];
-                nixpkgs.config.allowUnfree = true;
-                nix.registry.nixpkgs.flake = nixpkgs;
-              }
-              home-manager.nixosModules.home-manager 
-              {
-                home-manager.useGlobalPkgs = true;
-              }
-              (import (./hosts + "/${hostname}/default.nix"))
-              (import (./hosts + "/${hostname}/hardware-configuration.nix"))
-            ];
-          };
-        };
-      in {}
-      // (system-config "ajax" "jack" "x86_64-linux")
-      // (system-config "CASTOR" "jack" "x86_64-linux")
-      ;
+      });
 
-      darwinConfigurations = let 
-        darwin-system-config = hostname: username: system: 
-        let
-          myoverlay = mkOverlay system;
-        in {
-          "${hostname}" = darwin.lib.darwinSystem {
-            specialArgs = {
-              inherit hostname username;
-            };
-            modules = [
-              {
-                nixpkgs.overlays = [ myoverlay ];
-                nixpkgs.config.allowUnfree = true;
-                nix.registry.nixpkgs.flake = nixpkgs;
-              }
-              home-manager.darwinModules.home-manager 
-              { 
-                home-manager.useGlobalPkgs = true;
-              }
-              (import (./hosts + "/${hostname}/configuration.nix"))
-            ];
+    in {
+      lib = lib.my;
+      mkOverlay = system: final: prev:
+        {
+          unstable = mkPkgs system nixpkgs-git [ ];
+          dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
+            src = dwm.defaultPackage.${system}.src;
+            installPhase = dwm.defaultPackage.${system}.installPhase;
+            buildInputs = dwm.defaultPackage.${system}.buildInputs;
+          });
+          my = self.mkPackages system;
+          flutter-nix = flutter-nix.packages;
+        } // (if system == "x86_64-linux" then {
+          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
+        } else
+          { });
+
+      mkPackages = system:
+        let _pkgs = pkgs system;
+        in mapModules ./packages (p: _pkgs.callPackage p { });
+      mkPackagesWithOverlays = system: pkgs system;
+
+      nixosConfigurations = mapHosts ./hosts/x86_64-linux "x86_64-linux" { }
+        // mapHosts ./hosts/aarch64-linux "aarch64-linux" { };
+
+      deploy.nodes = {
+        donxt = {
+          hostname = "192.168.101.204";
+          sshUser = "root";
+          sshOpts = [ "-p 60022" ];
+          autoRollback = false;
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.x86_64-linux.activate.nixos
+              self.nixosConfigurations.donxt;
           };
         };
-      in {}
-      // darwin-system-config "DAHDEE" "Jack" "x86_64-darwin"
-      // darwin-system-config "Jack-Michaud" "jack" "aarch64-darwin"
-      ;
+        familypi = {
+          sshUser = "root";
+          hostname = "aarch64-builder";
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.aarch64-linux.activate.nixos
+              self.nixosConfigurations.familypi;
+          };
+        };
+
+        ajax = {
+          hostname = "localhost";
+          profiles.system = {
+            user = "root";
+            path = deploy-rs.lib.x86_64-linux.activate.nixos
+              self.nixosConfigurations.ajax;
+          };
+        };
+
+      };
+      # deploy-rs post deploy checks:
+      # This is highly advised, and will prevent many possible mistakes
+      #checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
+
+      darwinConfigurations = mapHosts ./hosts/x86_64-darwin "x86_64-darwin" { }
+        // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" { };
+
+      devShell.x86_64-linux = let pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      in pkgs.mkShell {
+        buildInputs = [
+          # get nixops from github
+          deploy-rs.defaultPackage.x86_64-linux
+        ];
+      };
     };
 }
