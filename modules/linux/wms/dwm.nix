@@ -15,7 +15,7 @@ in {
     #];
     # Enable the X11 windowing system.
     services.xserver.enable = true;
-    security.pam.services.lightdm.enableGnomeKeyring = true;
+    security.pam.services.gdm.enableGnomeKeyring = true;
     services.xserver.windowManager.dwm.enable = true;
     services.xserver.displayManager.sessionCommands = ''
       ${pkgs.feh}/bin/feh --bg-scale --no-xinerama ${
@@ -30,26 +30,6 @@ in {
     home.xsession = {
       enable = true;
       windowManager.command = "${pkgs.dwm}/bin/dwm";
-    };
-
-    systemd.user.services."dunst" = {
-      enable = true;
-      description = "";
-      wantedBy = [ "default.target" ];
-      serviceConfig.Restart = "always";
-      serviceConfig.RestartSec = 2;
-      serviceConfig.ExecStart = "${pkgs.dunst}/bin/dunst";
-    };
-    home.configFile."dunst/dunstrc" = {
-      text = readFile ../../../config/dunst/dunstrc;
-      onChange = ''
-        pkillVerbose=""
-        if [[ -v VERBOSE ]]; then
-          pkillVerbose="-e"
-        fi
-        $DRY_RUN_CMD ${pkgs.procps}/bin/pkill -u $USER $pkillVerbose dunst || true
-        unset pkillVerbose
-      '';
     };
 
     # Enable touchpad support (enabled default in most desktopManager).
