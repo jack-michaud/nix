@@ -12,5 +12,6 @@ library
     build-depends:
       , xmonad
       , xmonad-contrib
+      , containers
 
 

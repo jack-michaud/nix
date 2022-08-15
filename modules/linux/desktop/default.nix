@@ -19,5 +19,6 @@ with lib.my; {
 
     # Enables gnome keyring to unlock on login.
     security.pam.services.jack.enableGnomeKeyring = true;
+    services.gnome.gnome-keyring.enable = true;
   };
 }

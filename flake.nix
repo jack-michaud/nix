@@ -39,6 +39,8 @@
           inherit system;
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
+          # Temporary fix https://github.com/NixOS/nixpkgs/issues/158956
+          config.permittedInsecurePackages = [ "electron-13.6.9" ];
           overlays = extraOverlays;
         };
       pkgs = system: mkPkgs system nixpkgs ([ (self.mkOverlay system) ]);

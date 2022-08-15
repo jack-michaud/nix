@@ -116,11 +116,12 @@ let g:coc_snippet_prev = '<c-k>'
 xnoremap <leader>x  <Plug>(coc-convert-snippet)
 
 " LSP Stuff
+nmap <silent> <leader>h <Plug>(coc-hover)
 nmap <silent> <leader>. <Plug>(coc-definition)
 nmap <silent> <leader>, <Plug>(coc-references)
 " Applying codeAction to the selected region.
 " Example: `<leader>aap` for current paragraph
-xmap <leader>a  <Plug>(coc-codeaction-selected)
+xmap <leader>a  <Plug>(coc-codeaction)
 
 nmap <leader>R <Plug>(coc-rename)
 nmap <leader>cn <Plug>(coc-diagnostic-next)
@@ -142,7 +143,7 @@ augroup END
 lua << EOF
 require('nvim-treesitter.configs').setup {
   -- One of "all", "maintained" (parsers with maintainers), or a list of languages
-  ensure_installed = "maintained",
+  ensure_installed = {"python", "typescript", "go", "haskell", "nix"},
   
   -- Install languages synchronously (only applied to `ensure_installed`)
   sync_install = false,

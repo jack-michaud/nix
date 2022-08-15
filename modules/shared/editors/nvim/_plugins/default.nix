@@ -1,10 +1,10 @@
 { pkgs, ... }:
 let
-  customPlugin = { repo, owner, rev, sha256 }:
+  customPlugin = inputs@{ fetcher ? pkgs.fetchFromGitHub, ... }:
     pkgs.unstable.vimUtils.buildVimPlugin {
-      pname = repo;
+      pname = inputs.repo;
       version = "N";
-      src = pkgs.fetchFromGitHub { inherit owner repo rev sha256; };
+      src = fetcher inputs;
       nativeBuildInputs = [ pkgs.neovim-unwrapped ];
       HOME = "/tmp/";
     };
@@ -33,11 +33,19 @@ let
       rev = "36df6b281eb3cb47494933a3dc44c874086fa688";
       sha256 = "1lra7c38m3amqgdlb4gnl3rnvszwzn0yv624v2h4lhax8nzzq85j";
     }
+    #{
+    #  fetcher = inputs@{ url, sha256, ... }:
+    #    pkgs.fetchzip { inherit url sha256; };
+    #  repo = "copilot.vim";
+    #  url =
+    #    "https://git.internal.lomz.me/jack/copilot.vim/archive/47c5cc4f8f0d5be2b2d572950ebe4110e18451b5.tar.gz";
+    #  sha256 = "0ni232b8m4da5hcarpk0w1qskaywqlyxiib88qk4mgq8lclx11zx";
+    #}
     {
       owner = "github";
       repo = "copilot.vim";
-      rev = "47eb231463d3654de1a205c4e30567fbd006965d";
-      sha256 = "06znz1869h7cdh9xc0b54mysslgpf3qdwsj5zvnzrzk6fnfin03q";
+      rev = "da286d8c52159026f9cba16cd0f98b609c056841";
+      sha256 = "0y7f6db7qmlvk5swi95klgdq6bsdsfr9jy01400qdwxw0bbm5ini";
     }
   ];
   plugins = with pkgs.unstable.vimPlugins;

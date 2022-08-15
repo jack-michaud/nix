@@ -18,7 +18,7 @@
     };
 
     # Set your time zone.
-    time.timeZone = "America/Los_Angeles";
+    time.timeZone = "America/New_York";
 
     # The global useDHCP flag is deprecated, therefore explicitly set to false here.
     # Per-interface useDHCP will be mandatory in the future, so this generated config
@@ -101,14 +101,15 @@
       python.enable = true;
       go.enable = true;
       machine-learning.enable = true;
+      haskell.enable = true;
     };
     desktop = {
       sound.enable = true; # sound card is broken
       bluetooth.enable = true;
-      bitwarden-rofi.enable = true;
+      bitwarden-rofi.enable = false;
       terminals = { alacritty = { enable = true; }; };
       apps = {
-        cad.enable = true;
+        cad.enable = false;
         firefox.enable = true;
         chrome.enable = true;
         rofi.enable = true;
@@ -132,8 +133,11 @@
         obs-studio.enable = true;
       };
       sxhkd = { enable = true; };
+      dunst.enable = true;
+      picom.enable = true;
     };
-    wms.dwm.enable = true;
+    # wms.dwm.enable = true;
+    wms.xmonad.enable = true;
     editors.nvim.enable = true;
     shells.fish.enable = true;
     services = {

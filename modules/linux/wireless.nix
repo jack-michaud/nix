@@ -8,7 +8,7 @@ in {
 
   config = mkIf cfg.enable {
     networking.networkmanager.enable = true;
-    services.gnome.gnome-keyring.enable = true;
+    #services.gnome.gnome-keyring.enable = true;
     user.extraGroups = [ "networkmanager" ];
   };
 }

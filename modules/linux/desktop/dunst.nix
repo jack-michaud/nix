@@ -16,7 +16,7 @@ in {
       serviceConfig.ExecStart = "${pkgs.dunst}/bin/dunst";
     };
     home.configFile."dunst/dunstrc" = {
-      text = readFile ../../config/dunst/dunstrc;
+      text = readFile ../../../config/dunst/dunstrc;
       onChange = ''
         pkillVerbose=""
         if [[ -v VERBOSE ]]; then
