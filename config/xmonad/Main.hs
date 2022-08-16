@@ -68,6 +68,8 @@ warmPromptTheme = myPromptTheme
     , position              = Top
     }
 
+data ProjectContext = Work | Personal deriving Eq;
+
 projects :: [Project]
 projects = 
   [ Project { projectName = "scratch"
@@ -80,11 +82,24 @@ projects =
             }
   ]
 
+projectContext :: Project -> ProjectContext 
+projectContext project =
+  case projectName project of
+    "scratch" -> Personal
+    "core" -> Work
+    _ -> Personal
+
+
+
 isSpotify = title =? "Spotify"
+isSlack = className =? "Slack"
+isDiscord = className =? "discord"
 
 scratchpads :: NamedScratchpads
 scratchpads = 
   [ NS "music" "spotify" isSpotify doFloat
+  , NS "work-comm" "slack" isSlack doFloat
+  , NS "personal-comm" "discord" isDiscord doFloat
   ]
 
 myLayout = tiled ||| Mirror tiled ||| Full ||| threeCol
@@ -94,6 +109,19 @@ myLayout = tiled ||| Mirror tiled ||| Full ||| threeCol
     nmaster = 1
     ratio = 1/2
     delta = 3/100
+
+currentProjectContext :: X ProjectContext
+currentProjectContext = do projectContext <$> currentProject
+
+isWorkContext :: X Bool
+isWorkContext = do 
+  context <- currentProjectContext
+  return $ context == Work
+
+isPersonalContext :: X Bool
+isPersonalContext = do 
+  context <- currentProjectContext
+  return $ context == Personal
 
 main :: IO ()
 main = xmonad $ dynamicProjects projects $ ewmhFullscreen $ ewmh $ xmobarProp myConfig 
@@ -106,8 +134,11 @@ myManageHook = composeAll
   ]
 
 myDynamicManageHook :: ManageHook
-myDynamicManageHook =
-  isSpotify --> forceCenterFloat
+myDynamicManageHook = composeAll
+  [ isSpotify --> forceCenterFloat
+  , isSlack --> forceCenterFloat
+  , isDiscord --> forceCenterFloat
+  ]
 
 myConfig = def
   { modMask = mod4Mask -- mod4 is super key
@@ -122,6 +153,9 @@ myConfig = def
   , ("M-e", spawn (rofiBin ++ "-show emoji")) -- rofi emojis
   , ("M-S-f", spawn (rofiBin ++ "-show window")) -- window switcher
   , ("M-s", unGrab *> spawn "snip")
+  , ("M-S-s", sequence_ [ whenX isWorkContext (namedScratchpadAction scratchpads "work-comm")
+                        , whenX isPersonalContext (namedScratchpadAction scratchpads "personal-comm")
+                        ])
   , ("M-p", unGrab *> spawn "pick")
   , ("M-m", namedScratchpadAction scratchpads "music")
   , ("M-w", spawn browserBin)
@@ -129,7 +163,7 @@ myConfig = def
   , ("S-<F5>", spawn "/run/current-system/sw/bin/light -U 1")
   , ("<F6>", spawn "/run/current-system/sw/bin/light -A 5")
   , ("S-<F6>", spawn "/run/current-system/sw/bin/light -A 1")
-  , ("M-\\", switchProjectPrompt myPromptTheme)  
+  , ("M-S-p", switchProjectPrompt myPromptTheme)  
   ]
 
 
