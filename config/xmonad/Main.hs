@@ -20,6 +20,9 @@ import XMonad.Actions.DynamicProjects
 import XMonad.Prompt
 import XMonad.Hooks.DynamicProperty (dynamicPropertyChange, dynamicTitle)
 import qualified XMonad.StackSet as W
+import XMonad.Layout.Gaps (gaps)
+import XMonad.Layout.Spacing (smartSpacingWithEdge)
+import XMonad.Layout.NoBorders (noBorders)
 
 homeManagerProgram :: String -> String
 homeManagerProgram bin = "/etc/profiles/per-user/jack/bin/" ++ bin
@@ -28,7 +31,7 @@ browserBin = "google-chrome-stable"
 terminalBin = homeManagerProgram "alacritty"
 rofiBin = homeManagerProgram "rofi -show-icons -modi drun,ssh,window "
 
-myFont = "iosevka"
+myFont = "iosevka:14"
 base03  = "#002b36"
 base02  = "#073642"
 base01  = "#586e75"
@@ -78,7 +81,9 @@ projects =
             }
   , Project { projectName = "core"
             , projectDirectory = "~/Code/github.com/pairtreefamily/core-api/"
-            , projectStartHook = Just $ do spawn (terminalBin ++ " --command poetry run python manage.py runserver")
+            , projectStartHook = Just $ do spawn (terminalBin ++ " --command poetry shell") 
+                                           spawn (terminalBin ++ " --command poetry shell") 
+                                           spawn (terminalBin ++ "docker-compose up")
             }
   ]
 
@@ -89,23 +94,29 @@ projectContext project =
     "core" -> Work
     _ -> Personal
 
+workBrowserBin = browserBin ++ " --profile-directory=Work"
+personalBrowserBin = browserBin ++ " --profile-directory=Personal"
 
 
 isSpotify = title =? "Spotify"
 isSlack = className =? "Slack"
 isDiscord = className =? "discord"
+isBluetoothDeviceManager = title =? "Bluetooth Devices"
+isWorkCalendar = title ^? "PairTree - Calendar"
+
+workCalendarBin = workBrowserBin ++ " --app=https://calendar.google.com/"
 
 scratchpads :: NamedScratchpads
 scratchpads = 
   [ NS "music" "spotify" isSpotify doFloat
   , NS "work-comm" "slack" isSlack doFloat
+  , NS "work-calendar" workCalendarBin isWorkCalendar doFloat
   , NS "personal-comm" "discord" isDiscord doFloat
   ]
 
-myLayout = tiled ||| Mirror tiled ||| Full ||| threeCol
+myLayout = smartSpacingWithEdge 10 $ tiled ||| noBorders Full 
   where
     tiled = Tall nmaster delta ratio
-    threeCol = magnifier $ ThreeColMid nmaster delta ratio
     nmaster = 1
     ratio = 1/2
     delta = 3/100
@@ -129,6 +140,7 @@ main = xmonad $ dynamicProjects projects $ ewmhFullscreen $ ewmh $ xmobarProp my
 myManageHook :: ManageHook
 myManageHook = composeAll
   [ className =? "Gimp" --> doFloat
+  , isBluetoothDeviceManager --> doFloat
   , isDialog --> doFloat
   , namedScratchpadManageHook scratchpads
   ]
@@ -136,15 +148,18 @@ myManageHook = composeAll
 myDynamicManageHook :: ManageHook
 myDynamicManageHook = composeAll
   [ isSpotify --> forceCenterFloat
-  , isSlack --> forceCenterFloat
-  , isDiscord --> forceCenterFloat
+  , isSlack --> doFloat
+  , isDiscord --> doFloat
+  , isWorkCalendar --> doFloat
   ]
 
 myConfig = def
   { modMask = mod4Mask -- mod4 is super key
   , layoutHook = myLayout
   , terminal = terminalBin
-  , manageHook =   myManageHook
+  , manageHook = myManageHook
+  , focusedBorderColor = cyan
+  , normalBorderColor = base03
   , handleEventHook = dynamicTitle myDynamicManageHook
   }
   `additionalKeysP`
@@ -153,12 +168,14 @@ myConfig = def
   , ("M-e", spawn (rofiBin ++ "-show emoji")) -- rofi emojis
   , ("M-S-f", spawn (rofiBin ++ "-show window")) -- window switcher
   , ("M-s", unGrab *> spawn "snip")
+  , ("M-c", whenX isWorkContext (namedScratchpadAction scratchpads "work-calendar"))
   , ("M-S-s", sequence_ [ whenX isWorkContext (namedScratchpadAction scratchpads "work-comm")
                         , whenX isPersonalContext (namedScratchpadAction scratchpads "personal-comm")
                         ])
   , ("M-p", unGrab *> spawn "pick")
   , ("M-m", namedScratchpadAction scratchpads "music")
-  , ("M-w", spawn browserBin)
+  , ("M-w", sequence_ [ whenX isPersonalContext (spawn personalBrowserBin)
+                      , whenX isWorkContext (spawn workBrowserBin)])
   , ("<F5>", spawn "/run/current-system/sw/bin/light -U 5")
   , ("S-<F5>", spawn "/run/current-system/sw/bin/light -U 1")
   , ("<F6>", spawn "/run/current-system/sw/bin/light -A 5")
