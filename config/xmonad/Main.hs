@@ -1,8 +1,11 @@
 import XMonad
+import Data.List
 
 import XMonad.Util.EZConfig
 import XMonad.Util.Ungrab
-import XMonad.Util.NamedScratchpad;
+import XMonad.Util.NamedScratchpad
+
+import XMonad.Actions.UpdatePointer
 
 import XMonad.Layout.ThreeColumns
 import XMonad.Layout.Magnifier
@@ -28,8 +31,10 @@ homeManagerProgram :: String -> String
 homeManagerProgram bin = "/etc/profiles/per-user/jack/bin/" ++ bin
 
 browserBin = "google-chrome-stable"
-terminalBin = homeManagerProgram "alacritty"
-rofiBin = homeManagerProgram "rofi -show-icons -modi drun,ssh,window "
+terminalBin = "alacritty"
+logseqBin = "logseq"
+rofiBin = "rofi -show-icons -modi drun,ssh,window "
+webcamBin = "mpv --untimed --no-cache --no-osc --no-input-default-bindings --profile=low-latency --input-conf=/dev/null --title=webcam /dev/video4"
 
 myFont = "iosevka:14"
 base03  = "#002b36"
@@ -79,6 +84,11 @@ projects =
             , projectDirectory = "~/"
             , projectStartHook = Just $ do spawn terminalBin 
             }
+  , Project { projectName = "support"
+            , projectDirectory = "~/Code/github.com/pairtreefamily/core-api/"
+            , projectStartHook = Just $ do spawn workBrowserBin
+                                           spawn (terminalBin ++ " --command ssh script-host") 
+            }
   , Project { projectName = "core"
             , projectDirectory = "~/Code/github.com/pairtreefamily/core-api/"
             , projectStartHook = Just $ do spawn (terminalBin ++ " --command poetry shell") 
@@ -92,19 +102,24 @@ projectContext project =
   case projectName project of
     "scratch" -> Personal
     "core" -> Work
-    _ -> Personal
+    "support" -> Work
+    _ -> if isPrefixOf "work" (projectName project) then Work else Personal
 
 workBrowserBin = browserBin ++ " --profile-directory=Work"
 personalBrowserBin = browserBin ++ " --profile-directory=Personal"
 
 
-isSpotify = title =? "Spotify"
+isSpotify = className =? "Spotify"
 isSlack = className =? "Slack"
 isDiscord = className =? "discord"
 isBluetoothDeviceManager = title =? "Bluetooth Devices"
 isWorkCalendar = title ^? "PairTree - Calendar"
+isClickup = className ^? "ClickUp"
+isLogseq = className ^? "Logseq"
+isWebcam = title =? "webcam"
 
 workCalendarBin = workBrowserBin ++ " --app=https://calendar.google.com/"
+clickupBin = "clickup"
 
 scratchpads :: NamedScratchpads
 scratchpads = 
@@ -112,6 +127,9 @@ scratchpads =
   , NS "work-comm" "slack" isSlack doFloat
   , NS "work-calendar" workCalendarBin isWorkCalendar doFloat
   , NS "personal-comm" "discord" isDiscord doFloat
+  , NS "work-tasks" clickupBin isClickup doFloat
+  , NS "dev-log" logseqBin isLogseq doFloat
+  , NS "webcam" webcamBin isWebcam doFloat
   ]
 
 myLayout = smartSpacingWithEdge 10 $ tiled ||| noBorders Full 
@@ -151,6 +169,8 @@ myDynamicManageHook = composeAll
   , isSlack --> doFloat
   , isDiscord --> doFloat
   , isWorkCalendar --> doFloat
+  , isClickup --> doFloat
+  , isLogseq --> doFloat
   ]
 
 myConfig = def
@@ -160,7 +180,8 @@ myConfig = def
   , manageHook = myManageHook
   , focusedBorderColor = cyan
   , normalBorderColor = base03
-  , handleEventHook = dynamicTitle myDynamicManageHook
+  , logHook = updatePointer (0.01, 0.01) (0, 0) 
+  , handleEventHook = dynamicPropertyChange "WM_CLASS" myDynamicManageHook
   }
   `additionalKeysP`
   [ ("M-x", spawn "betterlockscreen  --dim 10 -l") -- lock screen
@@ -172,15 +193,19 @@ myConfig = def
   , ("M-S-s", sequence_ [ whenX isWorkContext (namedScratchpadAction scratchpads "work-comm")
                         , whenX isPersonalContext (namedScratchpadAction scratchpads "personal-comm")
                         ])
-  , ("M-p", unGrab *> spawn "pick")
+  --, ("M-p", unGrab *> spawn "pick")
   , ("M-m", namedScratchpadAction scratchpads "music")
+  , ("M-t", namedScratchpadAction scratchpads "work-tasks")
+  , ("M-S-l", namedScratchpadAction scratchpads "dev-log")
+  , ("M-S-w", namedScratchpadAction scratchpads "webcam")
   , ("M-w", sequence_ [ whenX isPersonalContext (spawn personalBrowserBin)
                       , whenX isWorkContext (spawn workBrowserBin)])
   , ("<F5>", spawn "/run/current-system/sw/bin/light -U 5")
   , ("S-<F5>", spawn "/run/current-system/sw/bin/light -U 1")
   , ("<F6>", spawn "/run/current-system/sw/bin/light -A 5")
   , ("S-<F6>", spawn "/run/current-system/sw/bin/light -A 1")
-  , ("M-S-p", switchProjectPrompt myPromptTheme)  
+  , ("M-p", switchProjectPrompt myPromptTheme)  
+  , ("M-S-p", shiftToProjectPrompt myPromptTheme)  
   ]
 
 
