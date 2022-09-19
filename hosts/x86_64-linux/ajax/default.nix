@@ -5,6 +5,7 @@
   ];
 
   config = {
+    hardware.keyboard.zsa.enable = true;
     networking = {
       hostName = "ajax"; # Define your hostname.
     };
@@ -123,6 +124,7 @@
         # writing 
         obsidian.enable = true;
         zotero.enable = true;
+        logseq.enable = true;
 
         code.enable = true;
         # Doom is kinda broken without impure and forces a rebuild of all modules
