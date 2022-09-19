@@ -42,10 +42,16 @@ let
     #  sha256 = "0ni232b8m4da5hcarpk0w1qskaywqlyxiib88qk4mgq8lclx11zx";
     #}
     {
-      owner = "github";
-      repo = "copilot.vim";
-      rev = "da286d8c52159026f9cba16cd0f98b609c056841";
-      sha256 = "0y7f6db7qmlvk5swi95klgdq6bsdsfr9jy01400qdwxw0bbm5ini";
+      owner = "zbirenbaum";
+      repo = "copilot-cmp";
+      rev = "a549a24eab37d6803555f40f292280ba01e686de";
+      sha256 = "0a558q0rimhajlaq16ll8kc18h42k536jjh7sslzm4f2hmijaks8";
+    }
+    {
+      owner = "zbirenbaum";
+      repo = "copilot.lua";
+      rev = "3d3f6a312e49c8333681c8163dc32f88b120ede5";
+      sha256 = "1g885k9mnjb8yvypbvc18vhjhr74hrmy7i1jm2z4g691c88gxhvs";
     }
   ];
   plugins = with pkgs.unstable.vimPlugins;
@@ -64,9 +70,14 @@ let
       telescope-nvim
       telescope-fzf-native-nvim
       # Coc
-      coc-nvim
-      coc-snippets
-      coc-rust-analyzer
+      packer-nvim
+      nvim-lspconfig
+      cmp-nvim-lsp
+      cmp-buffer
+      cmp-path
+      cmp-cmdline
+      nvim-cmp
+      copilot-vim
       # Theme
       vim-monokai-pro
       rust-vim

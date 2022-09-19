@@ -16,6 +16,9 @@ in {
       terraform-ls
       unstable.nodePackages.coc-rust-analyzer
       nixfmt
+
+      # LSP stuff
+      nodePackages.pyright
     ];
 
     home.programs.neovim = {

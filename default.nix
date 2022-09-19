@@ -87,7 +87,7 @@ with lib.my;
     unzip
     ripgrep
     ranger
-    nodejs
+    nodejs-16_x
     gcc
     htop
   ];

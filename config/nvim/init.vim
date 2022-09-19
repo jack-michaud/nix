@@ -99,33 +99,17 @@ noremap <leader>gb  :Gbrowse<Enter>
 noremap <leader>gs  :Git<Enter>
 noremap <leader>gl  :Gclog<Enter>
 
-"" Coc-snippets
-" Use <C-l> for trigger snippet expand.
-imap <C-l> <Plug>(coc-snippets-expand)
-
-" Use <C-j> for select text for visual placeholder of snippet.
-vmap <C-j> <Plug>(coc-snippets-select)
-
-" Use <C-j> for jump to next placeholder, it's default of coc.nvim
-let g:coc_snippet_next = '<c-j>'
-
-" Use <C-k> for jump to previous placeholder, it's default of coc.nvim
-let g:coc_snippet_prev = '<c-k>'
-
-" Use <leader>x for convert visual selected code to snippet
-xnoremap <leader>x  <Plug>(coc-convert-snippet)
-
 " LSP Stuff
-nmap <silent> <leader>h <Plug>(coc-hover)
-nmap <silent> <leader>. <Plug>(coc-definition)
-nmap <silent> <leader>, <Plug>(coc-references)
+"nmap <silent> <leader>h <Plug>(coc-hover)
+"nmap <silent> <leader>. <Plug>(coc-definition)
+"nmap <silent> <leader>, <Plug>(coc-references)
 " Applying codeAction to the selected region.
 " Example: `<leader>aap` for current paragraph
-xmap <leader>a  <Plug>(coc-codeaction)
+"xmap <leader>a  <Plug>(coc-codeaction)
 
-nmap <leader>R <Plug>(coc-rename)
-nmap <leader>cn <Plug>(coc-diagnostic-next)
-nmap <leader>cp <Plug>(coc-diagnostic-prev)
+"nmap <leader>R <Plug>(coc-rename)
+"nmap <leader>cn <Plug>(coc-diagnostic-next)
+"nmap <leader>cp <Plug>(coc-diagnostic-prev)
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 
@@ -143,7 +127,7 @@ augroup END
 lua << EOF
 require('nvim-treesitter.configs').setup {
   -- One of "all", "maintained" (parsers with maintainers), or a list of languages
-  ensure_installed = {"python", "typescript", "go", "haskell", "nix"},
+  ensure_installed = {"python", "typescript", "go", "haskell", "nix", "hcl"},
   
   -- Install languages synchronously (only applied to `ensure_installed`)
   sync_install = false,
@@ -201,4 +185,95 @@ require("null-ls").setup({
       end
     end,
 })
+EOF
+
+set completeopt=menu,menuone,noselect
+
+lua << EOF
+
+
+local cmp = require("cmp")
+local has_words_before = function()
+  if vim.api.nvim_buf_get_option(0, "buftype") == "prompt" then return false end
+  local line, col = unpack(vim.api.nvim_win_get_cursor(0))
+  return col ~= 0 and vim.api.nvim_buf_get_text(0, line-1, 0, line-1, col, {})[1]:match("^%s*$") == nil
+end
+
+cmp.setup({
+  sources = cmp.config.sources({
+    { name = "copilot", group_index = 2 },
+    { name = "nvim_lsp", group_index = 2 },
+  }),
+  mapping = cmp.mapping.preset.insert({
+    ["<CR>"] = cmp.mapping.confirm({ select = true }),
+    ["<Tab>"] = cmp.mapping(function(fallback)
+      if cmp.visible() then
+        cmp.select_next_item()
+      elseif has_words_before() then
+        cmp.complete()
+      else
+        fallback()
+      end
+    end, { "i", "s" }),
+    ["<S-Tab>"] = cmp.mapping(function()
+      if cmp.visible() then
+        cmp.select_prev_item()
+      elseif vim.fn["vsnip#jumpable"](-1) == 1 then
+        feedkey("<Plug>(vsnip-jump-prev)", "")
+      end
+    end, { "i", "s" }),
+  }),
+  window = {
+    completion = cmp.config.window.bordered(),
+    documentation = cmp.config.window.bordered(),
+  }
+})
+local capabilities = require("cmp_nvim_lsp").update_capabilities(vim.lsp.protocol.make_client_capabilities())
+local on_attach = function(client, bufnr)
+  -- 
+  vim.keymap.set('n', '<space>.', vim.lsp.buf.definition, bufopts)
+  vim.keymap.set('n', '<space>h', vim.lsp.buf.hover, bufopts)
+  vim.keymap.set('n', '<space>i', vim.lsp.buf.implementation, bufopts)
+  vim.keymap.set('n', '<space>R', vim.lsp.buf.rename, bufopts)
+  vim.keymap.set('n', '<space>ca', vim.lsp.buf.code_action, bufopts)
+  vim.keymap.set('n', '<space>,', vim.lsp.buf.references, bufopts)
+end
+
+require("lspconfig").pyright.setup{
+  on_attach = on_attach,
+  capabilities = capabilities,
+}
+require("lspconfig")["rust_analyzer"].setup{
+  on_attach = on_attach,
+  capabilities = capabilities,
+}
+
+
+EOF
+
+lua << EOF
+local packer = require("packer")
+packer.init({
+  git = {
+    default_url_format = "git@github.com:%s"
+  }
+})
+packer.startup(function(use)
+  use {
+    "zirenbaum/copilot.lua",
+    event = {"VimEnter"},
+    config = function()
+      vim.defer_fn(function()
+        require("copilot").setup()
+      end, 100)
+    end,
+  }
+  use {
+    "zirenbaum/copilot-cmp",
+    after = {"copilot.lua"},
+    config = function()
+      require("copilot_cmp").setup()
+    end,
+  }
+end)
 EOF
