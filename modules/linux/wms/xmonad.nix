@@ -9,25 +9,29 @@ in {
   config = mkIf cfg.enable {
 
     environment.systemPackages = [ pkgs.betterlockscreen ];
-    security.pam.services.gdm.enableGnomeKeyring = true;
     services.xserver = {
       enable = true;
       libinput.enable = true;
+      windowManager.xmonad.enable = true;
+      displayManager.defaultSession = "none+xmonad";
     };
-
-    home.xsession.windowManager.xmonad = {
+    security.pam.services.gdm.enableGnomeKeyring = true;
+    home.xsession = {
       enable = true;
-      enableContribAndExtras = true;
-      config = ../../../config/xmonad/Main.hs;
-      extraPackages = haskellPackages: [
-        haskellPackages.dbus
-        haskellPackages.List
-        haskellPackages.monad-logger
-        haskellPackages.xmonad
-        haskellPackages.xmonad-contrib
-        haskellPackages.containers_0_6_6
-        haskellPackages.xmobar
-      ];
+      windowManager.xmonad = {
+        enable = true;
+        enableContribAndExtras = true;
+        config = ../../../config/xmonad/Main.hs;
+        extraPackages = haskellPackages: [
+          haskellPackages.dbus
+          haskellPackages.List
+          haskellPackages.monad-logger
+          haskellPackages.xmonad
+          haskellPackages.xmonad-contrib
+          haskellPackages.containers_0_6_6
+          haskellPackages.xmobar
+        ];
+      };
     };
     home.programs.xmobar = {
       enable = true;
