@@ -138,25 +138,6 @@
         "type": "github"
       }
     },
-    "doom-emacs_3": {
-      "inputs": {
-        "nix-doom-emacs": "nix-doom-emacs",
-        "nixpkgs": "nixpkgs_6"
-      },
-      "locked": {
-        "lastModified": 1612297853,
-        "narHash": "sha256-rEzX9TwyOe8w0DpZUz2ZYr9EWasLOZ+3IhE3zfgybX8=",
-        "owner": "kylesferrazza",
-        "repo": "doom-d",
-        "rev": "3f87c1a87c0029f12eb96619ae5adcc6b528e066",
-        "type": "gitlab"
-      },
-      "original": {
-        "owner": "kylesferrazza",
-        "repo": "doom-d",
-        "type": "gitlab"
-      }
-    },
     "doom-emacs_4": {
       "flake": false,
       "locked": {
@@ -534,50 +515,6 @@
         "owner": "nix-community",
         "repo": "home-manager",
         "type": "github"
-      }
-    },
-    "home-manager_2": {
-      "inputs": {
-        "nixpkgs": [
-          "kyle-sferrazza-nix",
-          "nixpkgs"
-        ],
-        "utils": "utils_3"
-      },
-      "locked": {
-        "lastModified": 1657213438,
-        "narHash": "sha256-FKZRHORuj1BhlEqKgW7EYqRpH9WiAp+oV/tZ3x8e6Ow=",
-        "owner": "nix-community",
-        "repo": "home-manager",
-        "rev": "25a9948361cc6676e70c1b439e4d40f0610e8f76",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "home-manager",
-        "type": "github"
-      }
-    },
-    "kyle-sferrazza-nix": {
-      "inputs": {
-        "doom-emacs": "doom-emacs_3",
-        "home-manager": "home-manager_2",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "nixpkgs-master": [
-          "nixpkgs-git"
-        ],
-        "spicetify-nix": "spicetify-nix"
-      },
-      "locked": {
-        "narHash": "sha256-SOAOKRAKqFLB8zmtonDKEHiMBnO4qoj8T4z4OXvYPgU=",
-        "type": "tarball",
-        "url": "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz"
       }
     },
     "nix-doom-emacs": {
@@ -1015,7 +952,6 @@
         "emacs-overlay": "emacs-overlay",
         "flutter-nix": "flutter-nix",
         "home-manager": "home-manager",
-        "kyle-sferrazza-nix": "kyle-sferrazza-nix",
         "nixpkgs": "nixpkgs_8",
         "nixpkgs-git": "nixpkgs-git"
       }
@@ -1050,25 +986,6 @@
         "owner": "debug-ito",
         "repo": "rotate-text.el",
         "type": "github"
-      }
-    },
-    "spicetify-nix": {
-      "inputs": {
-        "nixpkgs": "nixpkgs_7",
-        "spicetify-themes": "spicetify-themes"
-      },
-      "locked": {
-        "lastModified": 1652714237,
-        "narHash": "sha256-ABP3Zx8cqseay+XJjBeXYLBAb+XdmKRSHYL/NhTVK1I=",
-        "owner": "kylesferrazza",
-        "repo": "spicetify-nix",
-        "rev": "c4700b48be67ddaf2befbbf79cbb50c021b92cf5",
-        "type": "gitlab"
-      },
-      "original": {
-        "owner": "kylesferrazza",
-        "repo": "spicetify-nix",
-        "type": "gitlab"
       }
     },
     "spicetify-themes": {

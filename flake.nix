@@ -17,13 +17,6 @@
     doom-emacs.inputs.emacs-overlay.follows = "emacs-overlay";
     emacs-overlay.url = "github:nix-community/emacs-overlay";
 
-    kyle-sferrazza-nix = {
-      url =
-        "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-git";
-    };
-
     deploy-rs.url = "github:serokell/deploy-rs";
 
     # nix-darwin input
@@ -31,7 +24,7 @@
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
   outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
-    , doom-emacs, kyle-sferrazza-nix, deploy-rs, flutter-nix, ... }:
+    , doom-emacs, deploy-rs, flutter-nix, ... }:
     let
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays:
@@ -64,9 +57,11 @@
           });
           my = self.mkPackages system;
           flutter-nix = flutter-nix.packages;
-        } // (if system == "x86_64-linux" then {
-          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
-        } else
+        } // (if system == "x86_64-linux" then
+          {
+            # Add custom overlays here
+          }
+        else
           { });
 
       mkPackages = system:
@@ -79,7 +74,8 @@
 
       deploy.nodes = {
         donxt = {
-          hostname = "192.168.101.204";
+          #hostname = "192.168.101.204";
+          hostname = "donxt";
           sshUser = "root";
           sshOpts = [ "-p 60022" ];
           autoRollback = false;
