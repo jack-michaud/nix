@@ -41,18 +41,18 @@ let
     #    "https://git.internal.lomz.me/jack/copilot.vim/archive/47c5cc4f8f0d5be2b2d572950ebe4110e18451b5.tar.gz";
     #  sha256 = "0ni232b8m4da5hcarpk0w1qskaywqlyxiib88qk4mgq8lclx11zx";
     #}
-    {
-      owner = "zbirenbaum";
-      repo = "copilot-cmp";
-      rev = "a549a24eab37d6803555f40f292280ba01e686de";
-      sha256 = "0a558q0rimhajlaq16ll8kc18h42k536jjh7sslzm4f2hmijaks8";
-    }
-    {
-      owner = "zbirenbaum";
-      repo = "copilot.lua";
-      rev = "3d3f6a312e49c8333681c8163dc32f88b120ede5";
-      sha256 = "1g885k9mnjb8yvypbvc18vhjhr74hrmy7i1jm2z4g691c88gxhvs";
-    }
+    #{
+    #  owner = "zbirenbaum";
+    #  repo = "copilot-cmp";
+    #  rev = "a549a24eab37d6803555f40f292280ba01e686de";
+    #  sha256 = "0a558q0rimhajlaq16ll8kc18h42k536jjh7sslzm4f2hmijaks8";
+    #}
+    #{
+    #  owner = "zbirenbaum";
+    #  repo = "copilot.lua";
+    #  rev = "3d3f6a312e49c8333681c8163dc32f88b120ede5";
+    #  sha256 = "1g885k9mnjb8yvypbvc18vhjhr74hrmy7i1jm2z4g691c88gxhvs";
+    #}
   ];
   plugins = with pkgs.unstable.vimPlugins;
     [
@@ -77,7 +77,7 @@ let
       cmp-path
       cmp-cmdline
       nvim-cmp
-      copilot-vim
+      # copilot-vim -- installed via packer
       # Theme
       vim-monokai-pro
       rust-vim

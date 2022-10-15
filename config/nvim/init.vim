@@ -91,7 +91,7 @@ nnoremap <leader>H :Telescope help_tags<enter>
 nnoremap <leader>S :cex system("rg --column ")<Left><Left>
 
 " Opens Git link for selected line or region in browser
-noremap <leader>gb  :Gbrowse<Enter>
+noremap <leader>gb  :GBrowse<Enter>
 " Adding hunks with :Gstatus - https://vi.stackexchange.com/a/21410
 "  - Press "=" on an file (shows git diff)
 "  - Press "-" on a hunk or visual selection to stage/unstage
@@ -125,9 +125,15 @@ augroup END
 
 
 lua << EOF
+local parser_install_dir = vim.fn.stdpath("cache") .. "/treesitters"
+
+vim.fn.mkdir(parser_install_dir, "p")
+
 require('nvim-treesitter.configs').setup {
   -- One of "all", "maintained" (parsers with maintainers), or a list of languages
-  ensure_installed = {"python", "typescript", "go", "haskell", "nix", "hcl"},
+  ensure_installed = {"python", "typescript", "go", "haskell", "nix", "hcl", "dart"},
+
+  parser_install_dir = parser_install_dir,
   
   -- Install languages synchronously (only applied to `ensure_installed`)
   sync_install = false,
@@ -160,6 +166,7 @@ require('gitsigns').setup()
 EOF
 
 lua << EOF
+local augroup = vim.api.nvim_create_augroup("LspFormatting", {})
 require("null-ls").setup({
     sources = {
         require("null-ls").builtins.formatting.black,
@@ -175,14 +182,21 @@ require("null-ls").setup({
         require("null-ls").builtins.diagnostics.mypy,
     },
     on_attach = function(client)
-      if client.resolved_capabilities.document_formatting then
-          vim.cmd([[
-          augroup LspFormatting
-            autocmd! * <buffer>
-            autocmd BufWritePre <buffer> lua vim.lsp.buf.formatting_sync()
-
-          ]])
-      end
+        if client.supports_method("textDocument/formatting") then
+            vim.api.nvim_clear_autocmds({ group = augroup, buffer = bufnr })
+            vim.api.nvim_create_autocmd("BufWritePre", {
+                group = augroup,
+                buffer = bufnr,
+                callback = function()
+                    vim.lsp.buf.format({ 
+                      bufnr = bufnr,
+                      filter = function(client)
+                        return client.name == "null-ls"
+                      end
+                    })
+                end,
+            })
+        end
     end,
 })
 EOF
@@ -201,8 +215,9 @@ end
 
 cmp.setup({
   sources = cmp.config.sources({
-    { name = "copilot", group_index = 2 },
+    { name = "copilot", group_index = 1 },
     { name = "nvim_lsp", group_index = 2 },
+    { name = "flutter-tools", group_index = 2}
   }),
   mapping = cmp.mapping.preset.insert({
     ["<CR>"] = cmp.mapping.confirm({ select = true }),
@@ -230,7 +245,6 @@ cmp.setup({
 })
 local capabilities = require("cmp_nvim_lsp").update_capabilities(vim.lsp.protocol.make_client_capabilities())
 local on_attach = function(client, bufnr)
-  -- 
   vim.keymap.set('n', '<space>.', vim.lsp.buf.definition, bufopts)
   vim.keymap.set('n', '<space>h', vim.lsp.buf.hover, bufopts)
   vim.keymap.set('n', '<space>i', vim.lsp.buf.implementation, bufopts)
@@ -249,9 +263,6 @@ require("lspconfig")["rust_analyzer"].setup{
 }
 
 
-EOF
-
-lua << EOF
 local packer = require("packer")
 packer.init({
   git = {
@@ -260,7 +271,7 @@ packer.init({
 })
 packer.startup(function(use)
   use {
-    "zirenbaum/copilot.lua",
+    "zbirenbaum/copilot.lua",
     event = {"VimEnter"},
     config = function()
       vim.defer_fn(function()
@@ -269,11 +280,63 @@ packer.startup(function(use)
     end,
   }
   use {
-    "zirenbaum/copilot-cmp",
+    "zbirenbaum/copilot-cmp",
     after = {"copilot.lua"},
+    requires = {"github/copilot.vim"},
     config = function()
       require("copilot_cmp").setup()
     end,
   }
+  -- Not declaratively installed because this updates daily
+  use {
+    "mfussenegger/nvim-dap",
+  }
+  use {
+    "williamboman/mason-lspconfig.nvim",
+    requires = "williamboman/mason.nvim",
+    config = function()
+      require("mason").setup()
+      require("mason-lspconfig").setup()
+      vim.keymap.set('n', '<space>m', function() vim.cmd("Mason") end, bufopts)
+    end
+  }
+  use {
+    'akinsho/flutter-tools.nvim',
+    after = {"nvim-dap"},
+    requires = 'nvim-lua/plenary.nvim', 
+    config = function()
+      local on_attach = function(client, bufnr)
+        vim.keymap.set('n', '<space>.', vim.lsp.buf.definition, bufopts)
+        vim.keymap.set('n', '<space>h', vim.lsp.buf.hover, bufopts)
+        vim.keymap.set('n', '<space>i', vim.lsp.buf.implementation, bufopts)
+        vim.keymap.set('n', '<space>R', vim.lsp.buf.rename, bufopts)
+        vim.keymap.set('n', '<space>ca', vim.lsp.buf.code_action, bufopts)
+        vim.keymap.set('n', '<space>,', vim.lsp.buf.references, bufopts)
+      end
+      require("flutter-tools").setup{
+        debugger = {
+          enabled = true;
+        },
+        lsp = {
+          on_attach = on_attach,
+          capabilities = capabilities,
+          color = {
+            enabled = true,
+            background = true,
+            virtual_text = false,
+          },
+          settings = {
+            showTodos = false,
+            renameFilesWithClasses = "prompt",
+            updateImportsOnRename = true,
+            completeFunctionCalls = true,
+            lineLength = 120,
+          },
+        },
+        dev_log = { enabled = true },
+      }
+    end
+  }
 end)
 EOF
+
