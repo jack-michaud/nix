@@ -111,6 +111,10 @@ with lib.my;
   };
   security.doas.enable = true;
 
+  # Disable wait online as it's causing trouble at rebuild
+  # See: https://github.com/NixOS/nixpkgs/issues/180175
+  systemd.services.NetworkManager-wait-online.enable = false;
+
   # DNS servers
   networking.nameservers = mkDefault [ "192.168.0.250" "1.1.1.1" ];
   networking.enableIPv6 = true;
