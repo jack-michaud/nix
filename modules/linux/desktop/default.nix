@@ -10,7 +10,7 @@ with lib.my; {
       xclip
       xbrightness
       feh
-      mesa_drivers
+      mesa.drivers
       libnotify
     ];
 
