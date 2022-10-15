@@ -3,10 +3,8 @@ with lib;
 with lib.my;
 
 let cfg = config.modules.desktop.apps.obsidian;
-in { 
+in {
   config = mkIf cfg.enable {
-    environment.systemPackages = [
-      pkgs.unstable.obsidian
-    ];
+    environment.systemPackages = [ pkgs.unstable.obsidian ];
   };
 }

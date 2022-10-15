@@ -3,16 +3,10 @@ with lib;
 with lib.my;
 let cfg = config.modules.services.tailscale;
 in {
-  options.modules.services.tailscale = {
-    enable = mkBoolOpt false;
-  };
+  options.modules.services.tailscale = { enable = mkBoolOpt false; };
 
   config = mkIf cfg.enable {
-    services.tailscale = {
-      enable = true;
-    };
-    environment.systemPackages = [
-      pkgs.tailscale
-    ];
+    services.tailscale = { enable = true; };
+    environment.systemPackages = [ pkgs.tailscale ];
   };
 }
