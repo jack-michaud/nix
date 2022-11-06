@@ -242,9 +242,14 @@ cmp.setup({
   window = {
     completion = cmp.config.window.bordered(),
     documentation = cmp.config.window.bordered(),
-  }
+  },
+  snippet = {
+    expand = function(args)
+      vim.fn["vsnip#anonymous"](args.body)
+    end,
+  },
 })
-local capabilities = require("cmp_nvim_lsp").update_capabilities(vim.lsp.protocol.make_client_capabilities())
+local capabilities = require("cmp_nvim_lsp").default_capabilities()
 local on_attach = function(client, bufnr)
   vim.keymap.set('n', '<space>.', vim.lsp.buf.definition, bufopts)
   vim.keymap.set('n', '<space>h', vim.lsp.buf.hover, bufopts)

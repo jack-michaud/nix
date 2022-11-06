@@ -66,6 +66,8 @@ let
       feline-nvim
       plenary-nvim
       gitsigns-nvim
+      vim-vsnip
+      cmp-vsnip
       # Telescope
       telescope-nvim
       telescope-fzf-native-nvim
