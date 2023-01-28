@@ -8,10 +8,9 @@ in {
 
   config = mkIf cfg.enable {
     environment.systemPackages = with pkgs; [
-      freecad
+      # unstable.freecad # I'm on the openscad grind! 
       openscad
       prusa-slicer
     ];
   };
 }
-

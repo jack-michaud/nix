@@ -107,7 +107,6 @@
     desktop = {
       sound.enable = true; # sound card is broken
       bluetooth.enable = true;
-      bitwarden-rofi.enable = false;
       terminals = { alacritty = { enable = true; }; };
       apps = {
         cad.enable = false;
