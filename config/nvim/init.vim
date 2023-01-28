@@ -123,87 +123,6 @@ augroup pythoncmds
 
 augroup END
 
-
-lua << EOF
-local parser_install_dir = vim.fn.stdpath("cache") .. "/treesitters"
-
-vim.fn.mkdir(parser_install_dir, "p")
-vim.opt.runtimepath:append(parser_install_dir)
-
-require('nvim-treesitter.configs').setup {
-  -- One of "all", "maintained" (parsers with maintainers), or a list of languages
-  ensure_installed = {"python", "typescript", "go", "haskell", "nix", "hcl", "dart"},
-
-  parser_install_dir = parser_install_dir,
-  
-  -- Install languages synchronously (only applied to `ensure_installed`)
-  sync_install = false,
-  
-  -- List of parsers to ignore installing
-  ignore_install = { "javascript" },
-  
-  highlight = {
-    -- `false` will disable the whole extension
-    enable = true,
-  
-    -- list of language that will be disabled
-    disable = { "c", "rust" },
-    
-    -- Setting this to true will run `:h syntax` and tree-sitter at the same time.
-    -- Set this to `true` if you depend on 'syntax' being enabled (like for indentation).
-    -- Using this option may slow down your editor, and you may see some duplicate highlights.
-    -- Instead of true it can also be a list of languages
-    additional_vim_regex_highlighting = false,
-  },
-}
-EOF
-
-lua << EOF
-require('feline').setup()
-EOF
-
-lua << EOF
-require('gitsigns').setup()
-EOF
-
-lua << EOF
-local augroup = vim.api.nvim_create_augroup("LspFormatting", {})
-require("null-ls").setup({
-    sources = {
-        require("null-ls").builtins.formatting.black,
-        require("null-ls").builtins.formatting.dart_format.with({
-          extra_args = {"--line-length=120"}
-        }),
-        require("null-ls").builtins.formatting.nixfmt,
-        require("null-ls").builtins.formatting.gofmt,
-        require("null-ls").builtins.formatting.phpcbf,
-        require("null-ls").builtins.formatting.rustfmt,
-        require("null-ls").builtins.formatting.terraform_fmt,
-
-        require("null-ls").builtins.diagnostics.mypy,
-    },
-    on_attach = function(client)
-        if client.supports_method("textDocument/formatting") then
-            vim.api.nvim_clear_autocmds({ group = augroup, buffer = bufnr })
-            vim.api.nvim_create_autocmd("BufWritePre", {
-                group = augroup,
-                buffer = bufnr,
-                callback = function()
-                    vim.lsp.buf.format({ 
-                      bufnr = bufnr,
-                      filter = function(client)
-                        return client.name == "null-ls"
-                      end
-                    })
-                end,
-            })
-        end
-    end,
-})
-EOF
-
-set completeopt=menu,menuone,noselect
-
 lua << EOF
 
 
@@ -263,6 +182,10 @@ require("lspconfig").pyright.setup{
   on_attach = on_attach,
   capabilities = capabilities,
 }
+require("lspconfig")["tsserver"].setup{
+  on_attach = on_attach,
+  capabilities = capabilities,
+}
 require("lspconfig")["rust_analyzer"].setup{
   on_attach = on_attach,
   capabilities = capabilities,
@@ -296,6 +219,37 @@ packer.startup(function(use)
   -- Not declaratively installed because this updates daily
   use {
     "mfussenegger/nvim-dap",
+  }
+  use {
+    "nvim-treesitter/nvim-treesitter",
+    config = function() 
+      require('nvim-treesitter.configs').setup {
+        -- One of "all", "maintained" (parsers with maintainers), or a list of languages
+        ensure_installed = {"python", "typescript", "go", "haskell", "nix", "hcl", "dart"},
+
+        parser_install_dir = parser_install_dir,
+        
+        -- Install languages synchronously (only applied to `ensure_installed`)
+        sync_install = false,
+        
+        -- List of parsers to ignore installing
+        ignore_install = { "javascript" },
+        
+        highlight = {
+          -- `false` will disable the whole extension
+          enable = true,
+        
+          -- list of language that will be disabled
+          disable = { "c", "rust" },
+          
+          -- Setting this to true will run `:h syntax` and tree-sitter at the same time.
+          -- Set this to `true` if you depend on 'syntax' being enabled (like for indentation).
+          -- Using this option may slow down your editor, and you may see some duplicate highlights.
+          -- Instead of true it can also be a list of languages
+          additional_vim_regex_highlighting = false,
+        },
+      }
+    end,
   }
   use {
     "williamboman/mason-lspconfig.nvim",
@@ -345,4 +299,60 @@ packer.startup(function(use)
   }
 end)
 EOF
+
+
+
+lua << EOF
+local parser_install_dir = vim.fn.stdpath("cache") .. "/treesitters"
+
+vim.fn.mkdir(parser_install_dir, "p")
+vim.opt.runtimepath:append(parser_install_dir)
+
+EOF
+
+lua << EOF
+require('feline').setup()
+EOF
+
+lua << EOF
+require('gitsigns').setup()
+EOF
+
+lua << EOF
+local augroup = vim.api.nvim_create_augroup("LspFormatting", {})
+require("null-ls").setup({
+    sources = {
+        require("null-ls").builtins.formatting.black,
+        require("null-ls").builtins.formatting.dart_format.with({
+          extra_args = {"--line-length=120"}
+        }),
+        require("null-ls").builtins.formatting.nixfmt,
+        require("null-ls").builtins.formatting.gofmt,
+        require("null-ls").builtins.formatting.phpcbf,
+        require("null-ls").builtins.formatting.rustfmt,
+        require("null-ls").builtins.formatting.terraform_fmt,
+
+        require("null-ls").builtins.diagnostics.mypy,
+    },
+    on_attach = function(client)
+        if client.supports_method("textDocument/formatting") then
+            vim.api.nvim_clear_autocmds({ group = augroup, buffer = bufnr })
+            vim.api.nvim_create_autocmd("BufWritePre", {
+                group = augroup,
+                buffer = bufnr,
+                callback = function()
+                    vim.lsp.buf.format({ 
+                      bufnr = bufnr,
+                      filter = function(client)
+                        return client.name == "null-ls"
+                      end
+                    })
+                end,
+            })
+        end
+    end,
+})
+EOF
+
+set completeopt=menu,menuone,noselect
 

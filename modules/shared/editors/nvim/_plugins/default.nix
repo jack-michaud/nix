@@ -62,7 +62,7 @@ let
       vim-sneak
       # neovim packages
       null-ls-nvim
-      nvim-treesitter
+      # nvim-treesitter
       feline-nvim
       plenary-nvim
       gitsigns-nvim
