@@ -8,6 +8,17 @@ Heavy influence from:
 - [Henrik Lissner](https://github.com/hlissner/dotfiles/)
 - [Kyle Sferrazza](https://gitlab.com/kylesferrazza/nix/)
 
+## Home Manager shortcuts
+
+```
+home.programs    ->  home-manager.users.{user}.programs
+home.services    ->  home-manager.users.{user}.services
+home.file        ->  home-manager.users.{user}.home.file
+home.configFile  ->  home-manager.users.{user}.home.xdg.configFile
+home.dataFile    ->  home-manager.users.{user}.home.xdg.dataFile
+home.xsession     ->  home-manager.users.{user}.xsession
+```
+
 ## Using on Darwin
 
 Add a new `darwin-system-config` to darwinConfigurations in `flake.nix`:
