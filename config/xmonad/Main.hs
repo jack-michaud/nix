@@ -6,6 +6,7 @@ import XMonad.Util.Ungrab
 import XMonad.Util.NamedScratchpad
 
 import XMonad.Actions.UpdatePointer
+import XMonad.Actions.TagWindows
 
 import XMonad.Layout.ThreeColumns
 import XMonad.Layout.Magnifier
@@ -31,9 +32,9 @@ homeManagerProgram :: String -> String
 homeManagerProgram bin = "/etc/profiles/per-user/jack/bin/" ++ bin
 
 browserBin = "google-chrome-stable"
-terminalBin = "alacritty"
+terminalBin = homeManagerProgram "alacritty"
 logseqBin = "logseq"
-rofiBin = "rofi -show-icons -modi drun,ssh,window "
+rofiBin = homeManagerProgram "rofi -show-icons -modi drun,ssh,window "
 webcamBin = "mpv --untimed --no-cache --no-osc --no-input-default-bindings --profile=low-latency --input-conf=/dev/null --title=webcam /dev/video4"
 
 myFont = "iosevka:14"
