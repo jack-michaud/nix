@@ -12,10 +12,10 @@ in {
       assertion = !isDarwin;
       message = "Cannot enable pulseaudio on darwin (desktop.sound)";
     }];
-    sound.enable = true;
-    hardware.pulseaudio = {
-      enable = true;
-      package = pkgs.pulseaudio.override { jackaudioSupport = true; };
-    };
+    # sound.enable = true;
+    # hardware.pulseaudio = {
+    #   enable = true;
+    #   package = pkgs.pulseaudio.override { jackaudioSupport = true; };
+    # };
   };
 }
