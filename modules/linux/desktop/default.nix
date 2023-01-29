@@ -12,6 +12,7 @@ with lib.my; {
       feh
       mesa.drivers
       libnotify
+      jq
     ];
 
     home.file.".Xresources".source =

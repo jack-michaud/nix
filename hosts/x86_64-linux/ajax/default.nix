@@ -138,7 +138,8 @@
       picom.enable = true;
     };
     # wms.dwm.enable = true;
-    wms.xmonad.enable = true;
+    # wms.xmonad.enable = true;
+    wms.hypr.enable = true;
     editors.nvim.enable = true;
     shells.fish.enable = true;
     services = {

@@ -22,6 +22,12 @@
     # nix-darwin input
     darwin.url = "github:lnl7/nix-darwin/master";
     darwin.inputs.nixpkgs.follows = "nixpkgs";
+    hyprland.url = "github:hyprwm/Hyprland/main";
+
+    hyprland-contrib = {
+      url = "github:hyprwm/contrib";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
     , doom-emacs, deploy-rs, flutter-nix, ... }:
@@ -29,7 +35,7 @@
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays:
         import pkgs {
-          inherit system;
+          inherit system inputs;
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
           # Temporary fix https://github.com/NixOS/nixpkgs/issues/158956
