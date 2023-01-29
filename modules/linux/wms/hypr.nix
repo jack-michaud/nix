@@ -22,6 +22,12 @@ in {
       pipewire
       wireplumber
       xdg-desktop-portal-hyprland
+      hyprpicker
+      wl-clipboard
+      hyprpaper
+      grimblast
+      grim
+      slurp
     ];
   };
 }

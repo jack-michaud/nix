@@ -28,6 +28,14 @@
       url = "github:hyprwm/contrib";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    hyprpicker = {
+      url = "github:hyprwm/hyprpicker";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    hyprpaper = {
+      url = "github:hyprwm/hyprpaper";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
     , doom-emacs, deploy-rs, flutter-nix, ... }:
@@ -42,7 +50,13 @@
           config.permittedInsecurePackages = [ "electron-13.6.9" ];
           overlays = extraOverlays;
         };
-      pkgs = system: mkPkgs system nixpkgs ([ (self.mkOverlay system) ]);
+      pkgs = system:
+        mkPkgs system nixpkgs ([
+          (self.mkOverlay system)
+          inputs.hyprpicker.outputs.overlays.default
+          inputs.hyprpaper.outputs.overlays.default
+          inputs.hyprland-contrib.outputs.overlays.default
+        ]);
       lib = nixpkgs.lib.extend (self: super: {
         # helpful library extensions.
         my = import ./lib {
@@ -66,6 +80,7 @@
         } // (if system == "x86_64-linux" then
           {
             # Add custom overlays here
+
           }
         else
           { });

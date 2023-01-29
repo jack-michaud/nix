@@ -6,6 +6,7 @@ with lib.my;
   imports =
     # Home manager
     [
+      # inputs.hyprland.homeManagerModules.default
       (if isDarwin then
         inputs.home-manager.darwinModules.home-manager
       else

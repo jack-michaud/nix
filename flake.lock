@@ -436,6 +436,46 @@
         "type": "github"
       }
     },
+    "hyprpaper": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1673799209,
+        "narHash": "sha256-GMRM1IyIuDEzjEw5E4zWI/TCg3zWs65v86NuR+BAtW0=",
+        "owner": "hyprwm",
+        "repo": "hyprpaper",
+        "rev": "f77a664e9d168fb7b332ede9db4a3e35a46dd6c5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hyprwm",
+        "repo": "hyprpaper",
+        "type": "github"
+      }
+    },
+    "hyprpicker": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1673270158,
+        "narHash": "sha256-22VKnL4PT3CSy0IErOkL1U85jq8sXmI7VPhcPtRYSko=",
+        "owner": "hyprwm",
+        "repo": "hyprpicker",
+        "rev": "fe4535a27389624445b96450a7c338136c619c95",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hyprwm",
+        "repo": "hyprpicker",
+        "type": "github"
+      }
+    },
     "nix-filter": {
       "locked": {
         "lastModified": 1638202388,
@@ -702,6 +742,8 @@
         "home-manager": "home-manager",
         "hyprland": "hyprland",
         "hyprland-contrib": "hyprland-contrib",
+        "hyprpaper": "hyprpaper",
+        "hyprpicker": "hyprpicker",
         "nixpkgs": "nixpkgs_6",
         "nixpkgs-git": "nixpkgs-git"
       }
