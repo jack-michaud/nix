@@ -40,6 +40,7 @@
     onActivation.autoUpdate = true;
     onActivation.extraFlags = [ "--force" ];
     brews = [
+      "gh"
       "herdr"
       "tmux"
       "neovim"
@@ -60,6 +61,9 @@
       tmux.enable = true;
       zsh.enable = true;
       herdr.enable = true;
+    };
+    desktop = {
+      terminals.alacritty.enable = true;
     };
   };
 }

@@ -8,7 +8,9 @@ with lib.my;
   };
   config = {
     user.home = "/Users/${config.user.name}";
-    environment.systemPath = [ "/usr/local/bin/" ];
+    # NOTE: /usr/local/bin is intentionally NOT prepended here — it's full of
+    # 2018 Intel-homebrew relics (git 2.19 etc.) that would shadow nix
+    # packages. macOS path_helper still appends it via /etc/paths.
 
     system.defaults = {
       dock = {

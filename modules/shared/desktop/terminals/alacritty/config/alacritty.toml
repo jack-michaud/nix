@@ -1,0 +1,16 @@
+[colors.primary]
+background = "#2d2a2e"
+foreground = "#f1ebeb"
+
+[font]
+size = 16.0
+
+[font.normal]
+family = "Iosevka Nerd Font"
+
+[window]
+opacity = 0.95
+
+[window.padding]
+x = 5
+y = 5
