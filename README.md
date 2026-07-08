@@ -4,6 +4,12 @@ My NixOS configs for cross-platform (`aarch64-darwin`, `aarch64-linux`, `x86_64-
 
 Uses `deploy-rs` for deploying remote machines.
 
+> **Note (July 2026):** This repo is darwin-only since the "darwin 2026
+> revival" cleanup — the flake no longer exposes `nixosConfigurations` or
+> deploy-rs nodes. The old linux desktop config (ajax: hyprland, pipewire,
+> xmonad) is preserved in history under merge commit `fe901c55`'s second
+> parent (`3c19e9a2`) if it ever needs reviving.
+
 Heavy influence from:
 - [Henrik Lissner](https://github.com/hlissner/dotfiles/)
 - [Kyle Sferrazza](https://gitlab.com/kylesferrazza/nix/)
