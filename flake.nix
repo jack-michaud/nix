@@ -49,7 +49,11 @@
 
       darwinConfigurations = mapHosts ./hosts/x86_64-darwin "x86_64-darwin" { }
         // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {
-          user = "Jack";
+          # Per-machine user accounts, keyed by hostname.
+          users = {
+            DAMOCLES = "jack";      # work machine
+            Jack-Michaud = "Jack";  # personal machine
+          };
         };
 
     };

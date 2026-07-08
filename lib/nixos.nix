@@ -33,7 +33,16 @@ with lib.my;
 
   # Assumes hosts dir has configurations of machines in the shape:
   # hosts/<system>/<hostname>/default.nix
-  mapHosts = dir: system: attrs @ { ... }:
-    mapModules dir
-      (hostPath: mkHost system hostPath attrs);
+  #
+  # `attrs` are passed to every host. A `users` attr (hostname -> username)
+  # is consumed here instead of forwarded: it sets each host's `user`
+  # specialArg individually, so machines can have different accounts
+  # (e.g. work `jack` vs personal `Jack`).
+  mapHosts = dir: system: attrs @ { users ? { }, ... }:
+    let baseAttrs = builtins.removeAttrs attrs [ "users" ];
+    in mapModules dir
+      (hostPath:
+        let host = baseNameOf hostPath;
+        in mkHost system hostPath
+          (baseAttrs // optionalAttrs (users ? ${host}) { user = users.${host}; }));
 }
