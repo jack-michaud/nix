@@ -1,4 +1,4 @@
-{ user, ... }:
+{ user, pkgs, ... }:
 {
     # Determinate already manages the Nix daemon, so nix-darwin shouldn't.
   nix.enable = false;
@@ -7,10 +7,15 @@
   nixpkgs.hostPlatform = "aarch64-darwin"; # use x86_64-darwin for Intel CPU
 
   system.primaryUser = user;
+  # Plain string (not a path) so it never gets copied into the nix store.
+  # Config symlinks (nvim, tmux) resolve here, so edits in the checkout
+  # apply without a rebuild — same effect as mkOutOfStoreSymlink.
+  dotfiles.dir = "/Users/${user}/Code/archive/nix/modules";
   users.users.${user} = {
     home = "/Users/${user}";
   };
   system.stateVersion = 6;
+  fonts.packages = [ pkgs.nerd-fonts.iosevka ];
   system.defaults = {
     NSGlobalDomain = {
       AppleInterfaceStyle = "Dark";
@@ -26,6 +31,7 @@
   };
   nix-homebrew = {
     enable = true;
+    autoMigrate = true;
     inherit user;
   };
   homebrew = {
@@ -35,6 +41,10 @@
     onActivation.extraFlags = [ "--force" ];
     brews = [
       "herdr"
+      "tmux"
+      "neovim"
+      "jj"
+      "starship"
     ];
     casks = [
       "claude-code"
@@ -44,6 +54,9 @@
     homebrew.enable = false; # Defined inline
     editors = {
       nvim.enable = true;
+    };
+    shells = {
+      tmux.enable = true;
     };
   };
 }
