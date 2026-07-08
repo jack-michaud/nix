@@ -45,6 +45,7 @@
       "neovim"
       "jj"
       "starship"
+      "fzf"
     ];
     casks = [
       "claude-code"

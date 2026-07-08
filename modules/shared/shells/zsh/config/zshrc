@@ -6,6 +6,10 @@ stty -ixon
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
+# Bootstrap oh-my-zsh and plugins on a fresh machine
+[ -d "$ZSH" ] || git clone https://github.com/ohmyzsh/ohmyzsh.git "$ZSH"
+[ -d "$ZSH/zsh-syntax-highlighting" ] || git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH/zsh-syntax-highlighting"
+
 ZSH_THEME="gallois"
 
 # Display red dots whilst waiting for completion.
