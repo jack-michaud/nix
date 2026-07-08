@@ -37,40 +37,8 @@ with lib.my;
       "nixpkgs-overlays=${config.dotfiles.dir}/../overlays"
       "dotfiles=${config.dotfiles.dir}"
     ];
-    settings = {
-      # Fix for https://github.com/NixOS/nixpkgs/issues/124215
-      extra-sandbox-paths = [ "/bin/sh=${pkgs.bash}/bin/sh" ];
-      substituters = [
-        "https://nix-community.cachix.org"
-        "https://jack-michaud-ajax.cachix.org"
-      ];
-      trusted-public-keys = [
-        "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
-        "jack-michaud-ajax.cachix.org-1:/AsBHtSL31exwTiTTnyPBiDA00HE+BkBAnl7NiwRQpw="
-      ];
-    };
     registry = registryInputs // { dotfiles.flake = inputs.self; };
 
-    # Remote builds
-    buildMachines = [
-      #{
-      #  hostName = "aarch64-builder";
-      #  system = "aarch64-linux";
-      #  maxJobs = 4;
-      #  speedFactor = 2;
-      #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
-      #  mandatoryFeatures = [];
-      #}
-      #{
-      #  hostName = "donxt";
-      #  system = "x86_64-linux";
-      #  maxJobs = 4;
-      #  speedFactor = 2;
-      #  supportedFeatures = [ "nixos-test" "benchmark" "big-parallel" "kvm" ];
-      #  mandatoryFeatures = [];
-      #}
-    ];
-    distributedBuilds = true;
 
   } // (if !isDarwin then { settings.auto-optimise-store = true; } else { });
   system.configurationRevision = with inputs; mkIf (self ? rev) self.rev;

@@ -1,37 +1,19 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    nix-darwin.url = "github:nix-darwin/nix-darwin/master";
+    nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
+
     nixpkgs-git.url = "github:NixOS/nixpkgs/master";
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    dwm = {
-      url = "github:jack-michaud/dwm";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    #emacs = {
-    #  url = "github:jack-michaud/doom.d";
-    #};
-    doom-emacs.url = "github:vlaci/nix-doom-emacs";
-    doom-emacs.inputs.emacs-overlay.follows = "emacs-overlay";
-    emacs-overlay.url = "github:nix-community/emacs-overlay";
 
-    kyle-sferrazza-nix = {
-      url =
-        "https://gitlab.com/kylesferrazza/nix/-/archive/xorg/nix-main.tar.gz";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-git";
-    };
-
-    deploy-rs.url = "github:serokell/deploy-rs";
-
-    # nix-darwin input
-    darwin.url = "github:lnl7/nix-darwin/master";
-    darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
-    , doom-emacs, kyle-sferrazza-nix, deploy-rs, ... }:
+  outputs = inputs@{ self, nixpkgs, nix-darkwin, nixpkgs-git, home-manager,... }:
     let
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays:
@@ -52,73 +34,14 @@
 
     in {
       lib = lib.my;
-      mkOverlay = system: final: prev:
-        {
-          unstable = mkPkgs system nixpkgs-git [ ];
-          dwm = prev.dwm.overrideAttrs (oldAttrs: rec {
-            src = dwm.defaultPackage.${system}.src;
-            installPhase = dwm.defaultPackage.${system}.installPhase;
-            buildInputs = dwm.defaultPackage.${system}.buildInputs;
-          });
-          my = self.mkPackages system;
-        } // (if system == "x86_64-linux" then {
-          kyle = (kyle-sferrazza-nix.overlay final prev).mine;
-        } else
-          { });
 
       mkPackages = system:
         let _pkgs = pkgs system;
         in mapModules ./packages (p: _pkgs.callPackage p { });
       mkPackagesWithOverlays = system: pkgs system;
 
-      nixosConfigurations = mapHosts ./hosts/x86_64-linux "x86_64-linux" { }
-        // mapHosts ./hosts/aarch64-linux "aarch64-linux" { };
-
-      deploy.nodes = {
-        donxt = {
-          hostname = "192.168.101.204";
-          sshUser = "root";
-          sshOpts = [ "-p 60022" ];
-          autoRollback = false;
-          profiles.system = {
-            user = "root";
-            path = deploy-rs.lib.x86_64-linux.activate.nixos
-              self.nixosConfigurations.donxt;
-          };
-        };
-        familypi = {
-          sshUser = "root";
-          hostname = "aarch64-builder";
-          profiles.system = {
-            user = "root";
-            path = deploy-rs.lib.aarch64-linux.activate.nixos
-              self.nixosConfigurations.familypi;
-          };
-        };
-
-        ajax = {
-          hostname = "localhost";
-          profiles.system = {
-            user = "root";
-            path = deploy-rs.lib.x86_64-linux.activate.nixos
-              self.nixosConfigurations.ajax;
-          };
-        };
-
-      };
-      # deploy-rs post deploy checks:
-      # This is highly advised, and will prevent many possible mistakes
-      #checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
-
       darwinConfigurations = mapHosts ./hosts/x86_64-darwin "x86_64-darwin" { }
         // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" { };
 
-      devShell.x86_64-linux = let pkgs = nixpkgs.legacyPackages.x86_64-linux;
-      in pkgs.mkShell {
-        buildInputs = [
-          # get nixops from github
-          deploy-rs.defaultPackage.x86_64-linux
-        ];
-      };
     };
 }
