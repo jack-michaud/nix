@@ -1,3 +1,5 @@
 result
 *qcow2
 logs/
+# Self-referential symlink accidentally created at repo root (./nix -> this repo)
+/nix
