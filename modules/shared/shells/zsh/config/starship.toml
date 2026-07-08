@@ -1,0 +1,15 @@
+# Starship prompt config. Symlinked to ~/.config/starship.toml by the zsh
+# module (out-of-store, so edits apply without a rebuild).
+
+# Starship re-runs each module's detection command on every prompt render;
+# there is no per-directory cache. The default timeout is 500ms, which the
+# pyenv `python` shim can exceed during shell startup (interpreter launch +
+# filesystem walk under load), producing "command timed out" warnings. Give a
+# safety margin for any module that shells out.
+command_timeout = 1000
+
+[python]
+# Don't launch the Python interpreter (`python --version`) just to render the
+# prompt — under pyenv that's the slow shim. `pyenv version-name` reads the
+# resolved version from files/env in ~0.1s and never starts the interpreter.
+pyenv_version_name = true

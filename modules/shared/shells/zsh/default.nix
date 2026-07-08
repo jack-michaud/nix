@@ -27,5 +27,12 @@ in {
     home.file.".zshrc".source = pkgs.runCommandLocal "zshrc" { } ''
       ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/zsh/config/zshrc"} $out
     '';
+
+    # Starship prompt config (same out-of-store symlink trick). Bumps
+    # command_timeout and points the python module at `pyenv version-name` so
+    # the slow pyenv shim never gets launched on every prompt render.
+    home.file.".config/starship.toml".source = pkgs.runCommandLocal "starship-config" { } ''
+      ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/zsh/config/starship.toml"} $out
+    '';
   };
 }
