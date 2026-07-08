@@ -17,7 +17,7 @@ in {
     # when dotfiles.dir is a non-store path, so edits apply without a rebuild.
     home.file.".config/herdr/config.toml".source =
       pkgs.runCommandLocal "herdr-config" { } ''
-        ln -s ${escapeShellArg "${config.dotfiles.dir}/shared/shells/herdr/config/config.toml"} $out
+        ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/config.toml"} $out
       '';
   };
 }

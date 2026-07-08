@@ -25,7 +25,7 @@ in {
     # when dotfiles.dir is a non-store path, so edits apply without a rebuild.
     # Secrets stay out of the repo in ~/.zshrc.local, sourced at the end.
     home.file.".zshrc".source = pkgs.runCommandLocal "zshrc" { } ''
-      ln -s ${escapeShellArg "${config.dotfiles.dir}/shared/shells/zsh/config/zshrc"} $out
+      ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/zsh/config/zshrc"} $out
     '';
   };
 }

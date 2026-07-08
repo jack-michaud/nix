@@ -22,7 +22,7 @@ in {
     # when dotfiles.dir is a non-store path, so edits apply without a rebuild.
     home.file.".config/alacritty/alacritty.toml".source =
       pkgs.runCommandLocal "alacritty-config" { } ''
-        ln -s ${escapeShellArg "${config.dotfiles.dir}/shared/desktop/terminals/alacritty/config/alacritty.toml"} $out
+        ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/desktop/terminals/alacritty/config/alacritty.toml"} $out
       '';
   };
 }

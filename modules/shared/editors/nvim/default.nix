@@ -15,7 +15,7 @@ in {
     # through the darwin-level `home.file` alias): links to the live checkout
     # when dotfiles.dir is a non-store path, so edits apply without a rebuild.
     home.file.".config/nvim".source = pkgs.runCommandLocal "nvim-config" { } ''
-      ln -s ${escapeShellArg "${config.dotfiles.dir}/shared/editors/nvim/config"} $out
+      ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/editors/nvim/config"} $out
     '';
 
   };

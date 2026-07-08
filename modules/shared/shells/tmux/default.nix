@@ -14,7 +14,7 @@ in {
     # through the darwin-level `home.file` alias): links to the live checkout
     # when dotfiles.dir is a non-store path, so edits apply without a rebuild.
     home.file.".config/tmux".source = pkgs.runCommandLocal "tmux-config" { } ''
-      ln -s ${escapeShellArg "${config.dotfiles.dir}/shared/shells/tmux/config"} $out
+      ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/tmux/config"} $out
     '';
   };
 }
