@@ -19,7 +19,7 @@ ZSH_THEME="gallois"
 # Display red dots whilst waiting for completion.
 COMPLETION_WAITING_DOTS="true"
 
-plugins=(git osx)
+plugins=(git)
 
 # oh-my-zsh always runs a full compinit (rescans every fpath dir). Shadow it:
 # trust the cached dump (-C) unless it's missing or older than a day.
