@@ -20,6 +20,11 @@ with lib.my;
   # soundly
   environment.variables.DOTFILES = config.dotfiles.dir;
 
+  # Install home-manager packages through the system profile
+  # (/etc/profiles/per-user) instead of a per-user nix profile, which
+  # doesn't exist under a Determinate-managed daemon.
+  home-manager.useUserPackages = true;
+
   # Configure nix and nixpkgs
   environment.variables.NIXPKGS_ALLOW_UNFREE = "1";
   nix = let

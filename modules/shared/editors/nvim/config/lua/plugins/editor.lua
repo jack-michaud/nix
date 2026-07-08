@@ -153,7 +153,7 @@ return {
       { "<c-l>", "<cmd><C-U>TmuxNavigateRight<cr>" },
       { "<c-\\>", "<cmd><C-U>TmuxNavigatePrevious<cr>" },
     },
-  }
+  },
   { "stevearc/oil.nvim",
    ---@module 'oil'
   ---@type oil.SetupOpts
@@ -210,6 +210,4 @@ return {
     { "<leader>ad", "<cmd>ClaudeCodeDiffDeny<cr>", desc = "Deny diff" },
   },
 }
-
->>>>>>> a528c4bf8e2ef42cee923c32325eb583d0eb2dd6
 }
