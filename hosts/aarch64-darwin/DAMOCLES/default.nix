@@ -57,6 +57,7 @@
     };
     shells = {
       tmux.enable = true;
+      zsh.enable = true;
     };
   };
 }
