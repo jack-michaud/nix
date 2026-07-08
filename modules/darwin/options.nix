@@ -27,7 +27,7 @@ with lib.my;
         # dark mode
         AppleInterfaceStyle = "Dark";
         # hide menu bar
-        _HIHideMenuBar = false;
+        _HIHideMenuBar = mkDefault false;
       };
     };
 

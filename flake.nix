@@ -12,8 +12,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    nix-homebrew.url = "github:zhaofengli/nix-homebrew";
+
   };
-  outputs = inputs@{ self, nixpkgs, nix-darkwin, nixpkgs-git, home-manager,... }:
+  outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays:
@@ -27,7 +29,7 @@
       lib = nixpkgs.lib.extend (self: super: {
         # helpful library extensions.
         my = import ./lib {
-          inherit pkgs inputs darwin;
+          inherit pkgs inputs nix-darwin;
           lib = self;
         };
       });
@@ -35,13 +37,20 @@
     in {
       lib = lib.my;
 
+      mkOverlay = system: final: prev: {
+        unstable = mkPkgs system nixpkgs-git [ ];
+        my = self.mkPackages system;
+      };
+
       mkPackages = system:
         let _pkgs = pkgs system;
         in mapModules ./packages (p: _pkgs.callPackage p { });
       mkPackagesWithOverlays = system: pkgs system;
 
       darwinConfigurations = mapHosts ./hosts/x86_64-darwin "x86_64-darwin" { }
-        // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" { };
+        // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {
+          user = "Jack";
+        };
 
     };
 }

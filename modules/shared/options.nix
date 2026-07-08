@@ -63,7 +63,7 @@ with lib.my; {
           file = mkAliasDefinitions options.home.file;
           # Necessary for home-manager to work with flakes, otherwise it will
           # look for a nixpkgs channel.
-          stateVersion = "21.05";
+          stateVersion = "26.05";
         };
         xdg = {
           configFile = mkAliasDefinitions options.home.configFile;
@@ -74,11 +74,6 @@ with lib.my; {
 
     users.users.${config.user.name} = mkAliasDefinitions options.user;
 
-    nix.settings = let users = [ "root" config.user.name ];
-    in {
-      trusted-users = users;
-      allowed-users = users;
-    };
 
     # must already begin with pre-existing PATH. Also, can't use binDir here,
     # because it contains a nix store path.

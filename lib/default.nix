@@ -5,7 +5,7 @@
 # lib = lib.my 
 # 
 # (source: https://github.com/hlissner/dotfiles/blob/1173284b76561d41edcb17062badccda012f7f2e/flake.nix#L42-L45)
-{ inputs, lib, pkgs, darwin, ... }:
+{ inputs, lib, pkgs, nix-darwin, ... }:
 
 let
   inherit (lib) makeExtensible attrValues foldr;
@@ -18,7 +18,7 @@ let
 
   mylib = makeExtensible (self:
     with self; mapModules ./.
-      (file: import file { inherit self lib pkgs inputs darwin; }));
+      (file: import file { inherit self lib pkgs inputs nix-darwin; }));
 in
 mylib.extend
   (self: super:

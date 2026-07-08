@@ -1,17 +1,19 @@
-{ inputs, lib, pkgs, darwin, self, ... }:
+{ inputs, lib, pkgs, nix-darwin, self, ... }:
 
 with lib;
 with lib.my;
 {
   mkHost = system: path: attrs @ { ... }:
     let
-      isDarwin = strings.hasInfix "darwin" system; 
-      specialArgs = { inherit lib inputs isDarwin; generators = (import ../utils/generators.nix { inherit lib pkgs; }).mkGenerators system; };
+      isDarwin = strings.hasInfix "darwin" system;
+      specialArgs = { inherit lib inputs isDarwin; generators = (import ../utils/generators.nix { inherit lib pkgs; }).mkGenerators system; }
+        // optionalAttrs (attrs ? user) { inherit (attrs) user; };
     in
-      if isDarwin then darwin.lib.darwinSystem {
+      if isDarwin then nix-darwin.lib.darwinSystem {
         specialArgs = specialArgs // { pkgs = pkgs system; };
         modules = [
-          (filterAttrs (n: v: !elem n [ "system" ]) attrs)
+          (filterAttrs (n: v: !elem n [ "system" "user" ]) attrs)
+          inputs.nix-homebrew.darwinModules.nix-homebrew
           ../.   # /default.nix
           (import path)
         ];

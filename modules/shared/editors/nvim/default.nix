@@ -1,4 +1,4 @@
-{ config, options, lib, pkgs, ... }:
+{ config, options, lib, pkgs, dotfiles, ... }:
 
 with lib;
 with lib.my;
@@ -11,29 +11,12 @@ in {
   config = mkIf cfg.enable {
     env.EDITOR = "nvim";
 
-    environment.systemPackages = with pkgs; [
-      ag
-      terraform-ls
-      unstable.nodePackages.coc-rust-analyzer
-      nixfmt
-    ];
-
-    home.programs.neovim = {
-      enable = true;
-      viAlias = true;
-      vimAlias = true;
-      withNodeJs = true;
-      withPython3 = true;
-      extraConfig = (builtins.readFile "${config.dotfiles.configDir}/nvim/init.vim");
-      plugins = (pkgs.unstable.callPackage ./_plugins/default.nix { inherit pkgs; }).plugins;
-    };
-
-    home.configFile."nvim/coc-settings.json" = {
-      text = readFile ../../../../config/nvim/coc-settings.json;
-    };
+    # Equivalent of home-manager's mkOutOfStoreSymlink, which isn't reachable
+    # through the darwin-level `home.file` alias.
+    home.file.".config/nvim".source = pkgs.runCommandLocal "nvim-config" { } ''
+      ln -s ${escapeShellArg "${config.dotfiles.dir}/modules/shared/editors/nvim/config"} $out
+    '';
 
   };
 
-  # Extra plugin config:
-  imports = [./_plugins/black.nix];
 }
