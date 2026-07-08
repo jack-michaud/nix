@@ -1,5 +1,5 @@
 # Shared options and config
-{ config, options, lib, home-manager, ... }:
+{ config, options, lib, home-manager, ... } @ args:
 
 with lib;
 with lib.my; {
@@ -41,8 +41,15 @@ with lib.my; {
 
   config = {
     user = let
-      user = builtins.getEnv "USER";
-      name = if elem user [ "" "root" ] then "jack" else user;
+      envUser = builtins.getEnv "USER";
+      # Prefer the `user` specialArg from the flake; $USER is empty under
+      # pure eval, so the env fallback only works for impure builds.
+      name = if args ? user then
+        args.user
+      else if elem envUser [ "" "root" ] then
+        "jack"
+      else
+        envUser;
     in {
       inherit name;
       description = "The primary user account";
