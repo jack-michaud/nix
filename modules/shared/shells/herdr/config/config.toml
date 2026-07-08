@@ -1,0 +1,17 @@
+# herdr configuration — managed by nix: modules/shared/shells/herdr
+# (symlinked to the live checkout; `herdr server reload-config` applies edits).
+
+[keys]
+# Match tmux muscle memory (see modules/shared/shells/tmux/config/tmux.conf)
+prefix = "ctrl+s"
+
+# prefix+r reloads config, like tmux `bind r source-file`.
+# resize_mode defaults to prefix+r, so it moves to prefix+shift+r.
+reload_config = "prefix+r"
+resize_mode = "prefix+shift+r"
+
+# vi-style pane navigation (herdr defaults, pinned to protect muscle memory)
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"

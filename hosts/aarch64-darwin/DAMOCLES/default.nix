@@ -59,6 +59,7 @@
     shells = {
       tmux.enable = true;
       zsh.enable = true;
+      herdr.enable = true;
     };
   };
 }
