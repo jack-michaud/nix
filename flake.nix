@@ -31,7 +31,7 @@
     darwin.inputs.nixpkgs.follows = "nixpkgs";
   };
   outputs = inputs@{ self, nixpkgs, nixpkgs-git, dwm, home-manager, darwin
-    , doom-emacs, kyle-sferrazza-nix, deploy-rs, flutter-nix, ... }:
+    , doom-emacs, kyle-sferrazza-nix, deploy-rs, ... }:
     let
       inherit (lib.my) mapModules mapModulesRec mapHosts;
       mkPkgs = system: pkgs: extraOverlays:
@@ -61,7 +61,6 @@
             buildInputs = dwm.defaultPackage.${system}.buildInputs;
           });
           my = self.mkPackages system;
-          flutter-nix = flutter-nix.packages;
         } // (if system == "x86_64-linux" then {
           kyle = (kyle-sferrazza-nix.overlay final prev).mine;
         } else
