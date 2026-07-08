@@ -10,7 +10,7 @@
   # Plain string (not a path) so it never gets copied into the nix store.
   # Config symlinks (nvim, tmux) resolve here, so edits in the checkout
   # apply without a rebuild — same effect as mkOutOfStoreSymlink.
-  dotfiles.dir = "/Users/${user}/Code/archive/nix/modules";
+  dotfiles.dir = "/Users/${user}/.config/dotfiles";
   users.users.${user} = {
     home = "/Users/${user}";
   };
@@ -47,6 +47,7 @@
       "jj"
       "starship"
       "fzf"
+      "pyenv"
     ];
     casks = [
       "claude-code"
