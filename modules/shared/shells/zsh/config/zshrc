@@ -39,6 +39,9 @@ source $ZSH/oh-my-zsh.sh
 source ~/.oh-my-zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Aliases
+# Rebuild this machine: DOTFILES and NIX_FLAKE_HOST are baked in per host by
+# nix (default.nix / lib/nixos.nix); hostname is only a pre-rebuild fallback.
+alias rebuild='"$DOTFILES/rebuild.sh" "${NIX_FLAKE_HOST:-$(hostname -s)}"'
 alias c="clear"
 alias vim="nvim"
 alias coad='cd $(find ~/Code -maxdepth 3 | fzf)'
