@@ -8,6 +8,58 @@
 # safety margin for any module that shells out.
 command_timeout = 1000
 
+# Minimal left prompt; git/python/duration/clock metadata rendered in zsh's
+# RPROMPT so the typing area stays clean.
+format = "$directory$character"
+right_format = "${custom.jj}${custom.git_branch}${custom.git_status}$python$cmd_duration$time"
+
+# jj change id + bookmarks instead of git branch/status inside jj repos.
+# --ignore-working-copy is load-bearing everywhere below: without it every
+# prompt render snapshots the working copy and pollutes the op log.
+[custom.jj]
+when = "jj root --ignore-working-copy"
+command = '''
+jj log -r @ --no-graph --limit 1 --ignore-working-copy --color always -T '
+  separate(" ",
+    raw_escape_sequence("\x1b[35m") ++ change_id.shortest(4) ++ raw_escape_sequence("\x1b[0m"),
+    if(bookmarks, raw_escape_sequence("\x1b[36m") ++ bookmarks.join(" ") ++ raw_escape_sequence("\x1b[0m")),
+    if(conflict, raw_escape_sequence("\x1b[31m") ++ "conflict" ++ raw_escape_sequence("\x1b[0m")),
+    if(empty, raw_escape_sequence("\x1b[90m") ++ "(empty)" ++ raw_escape_sequence("\x1b[0m")),
+  )'
+'''
+format = "$output "
+
+# The built-in git modules render noise in colocated jj repos (detached HEAD,
+# jj's auto-snapshots as stashes), so only render them outside jj repos.
+[custom.git_branch]
+when = "! jj root --ignore-working-copy"
+# starship trims custom-command output, so the space lives in format instead.
+command = "starship module git_branch"
+format = "$output "
+
+[custom.git_status]
+when = "! jj root --ignore-working-copy"
+command = "starship module git_status"
+format = "$output "
+
+[git_branch]
+format = "[$branch]($style) "
+style = "bright-black"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style) "
+style = "cyan"
+
+[cmd_duration]
+min_time = 2000
+format = "[$duration]($style) "
+style = "yellow"
+
+[time]
+disabled = false
+format = "[$time]($style)"
+style = "bright-black"
+
 [python]
 # Don't launch the Python interpreter (`python --version`) just to render the
 # prompt — under pyenv that's the slow shim. `pyenv version-name` reads the
