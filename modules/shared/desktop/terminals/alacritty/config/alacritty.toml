@@ -1,6 +1,37 @@
+# Monokai Pro palette — herdr follows this via [theme] name = "terminal"
+# (see modules/shared/shells/herdr/config/config.toml)
+
 [colors.primary]
 background = "#2d2a2e"
-foreground = "#f1ebeb"
+foreground = "#fcfcfa"
+
+[colors.cursor]
+text = "#2d2a2e"
+cursor = "#fcfcfa"
+
+[colors.selection]
+text = "CellForeground"
+background = "#5b595c"
+
+[colors.normal]
+black = "#403e41"
+red = "#ff6188"
+green = "#a9dc76"
+yellow = "#ffd866"
+blue = "#fc9867"
+magenta = "#ab9df2"
+cyan = "#78dce8"
+white = "#fcfcfa"
+
+[colors.bright]
+black = "#727072"
+red = "#ff6188"
+green = "#a9dc76"
+yellow = "#ffd866"
+blue = "#fc9867"
+magenta = "#ab9df2"
+cyan = "#78dce8"
+white = "#fcfcfa"
 
 [font]
 size = 16.0
@@ -8,9 +39,19 @@ size = 16.0
 [font.normal]
 family = "Iosevka Nerd Font"
 
+[font.italic]
+style = "Italic"
+
+[cursor.style]
+shape = "Beam"
+blinking = "On"
+
 [window]
 opacity = 0.95
+blur = true
+decorations = "Buttonless"
+dynamic_padding = true
 
 [window.padding]
-x = 5
-y = 5
+x = 14
+y = 12

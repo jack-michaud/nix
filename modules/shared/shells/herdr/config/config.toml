@@ -15,3 +15,25 @@ focus_pane_left = "prefix+h"
 focus_pane_down = "prefix+j"
 focus_pane_up = "prefix+k"
 focus_pane_right = "prefix+l"
+
+[theme]
+# Inherit the host terminal palette — Monokai Pro, defined once in
+# modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
+name = "terminal"
+
+[theme.custom]
+accent = "#ffd866" # Monokai yellow
+
+[ui]
+agent_panel_sort = "spaces"
+accent = "#ffd866"
+show_agent_labels_on_pane_borders = true
+hide_tab_bar_when_single_tab = true
+pane_gaps = true
+
+[ui.toast]
+# In-app toasts when background agents finish or need attention.
+delivery = "herdr"
+
+[ui.sound]
+enabled = true
