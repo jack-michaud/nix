@@ -17,7 +17,7 @@
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
-      inherit (lib.my) mapModules mapModulesRec mapHosts;
+      inherit (lib.my) mapModules mapModulesRec mapHosts mkHost;
       mkPkgs = system: pkgs: extraOverlays:
         import pkgs {
           inherit system;
@@ -51,8 +51,13 @@
         // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {
           # Per-machine user accounts, keyed by hostname.
           users = {
-            DAMOCLES = "jack";      # work machine
-            Jack-Michaud = "Jack";  # personal machine
+            DAMOCLES = "Jack";
+          };
+        } // {
+          # Work laptop: same config as DAMOCLES, but the account is `jack`.
+          Jack-Michaud-Mbp = mkHost "aarch64-darwin" ./hosts/aarch64-darwin/DAMOCLES {
+            user = "jack";
+            hostName = "Jack-Michaud-Mbp";
           };
         };
 

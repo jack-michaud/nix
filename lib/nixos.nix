@@ -6,7 +6,9 @@ with lib.my;
   mkHost = system: path: attrs @ { ... }:
     let
       isDarwin = strings.hasInfix "darwin" system;
-      hostName = removeSuffix ".nix" (baseNameOf path);
+      # Defaults to the file/dir name, but can be overridden so several
+      # machines can share one host config (e.g. work laptop reusing DAMOCLES).
+      hostName = attrs.hostName or (removeSuffix ".nix" (baseNameOf path));
       specialArgs = { inherit lib inputs isDarwin; generators = (import ../utils/generators.nix { inherit lib pkgs; }).mkGenerators system; }
         // optionalAttrs (attrs ? user) { inherit (attrs) user; };
     in
@@ -16,7 +18,7 @@ with lib.my;
           # Flake output name of this host, so shells can e.g. rebuild with
           # the right `--flake .#<host>` without guessing from `hostname`.
           { environment.variables.NIX_FLAKE_HOST = hostName; }
-          (filterAttrs (n: v: !elem n [ "system" "user" ]) attrs)
+          (filterAttrs (n: v: !elem n [ "system" "user" "hostName" ]) attrs)
           inputs.nix-homebrew.darwinModules.nix-homebrew
           ../.   # /default.nix
           (import path)
@@ -30,7 +32,7 @@ with lib.my;
             networking.hostName = mkDefault hostName;
             environment.variables.NIX_FLAKE_HOST = hostName;
           }
-          (filterAttrs (n: v: !elem n [ "system" ]) attrs)
+          (filterAttrs (n: v: !elem n [ "system" "hostName" ]) attrs)
           ../.   # /default.nix
           (import path)
         ];
