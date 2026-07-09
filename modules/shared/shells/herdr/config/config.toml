@@ -25,7 +25,7 @@ name = "terminal"
 accent = "#ffd866" # Monokai yellow
 
 [ui]
-agent_panel_sort = "spaces"
+agent_panel_sort = "priority"
 accent = "#ffd866"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
