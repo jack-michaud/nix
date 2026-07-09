@@ -48,7 +48,9 @@
       "starship"
       "fzf"
       "pyenv"
+      "libb2"  # pyenv-built Python links _blake2 against this; zap cleanup removes it otherwise
       "awscli"
+      "postgresql@15"
     ];
     casks = [
       "claude-code"
