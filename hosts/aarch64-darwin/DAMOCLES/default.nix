@@ -48,6 +48,7 @@
       "starship"
       "fzf"
       "pyenv"
+      "awscli"
     ];
     casks = [
       "claude-code"

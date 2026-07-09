@@ -55,9 +55,9 @@
           };
         } // {
           # Work laptop: same config as DAMOCLES, but the account is `jack`.
-          Jack-Michaud-Mbp = mkHost "aarch64-darwin" ./hosts/aarch64-darwin/DAMOCLES {
+          KRONOS = mkHost "aarch64-darwin" ./hosts/aarch64-darwin/DAMOCLES {
             user = "jack";
-            hostName = "Jack-Michaud-Mbp";
+            hostName = "KRONOS";
           };
         };
 
