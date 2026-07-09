@@ -51,7 +51,7 @@ with lib.my;
   # Just the bear necessities...
   environment.systemPackages = with pkgs; [
     bind
-    coreutils
+    coreutils-prefixed
     git
     vim
     fzf
