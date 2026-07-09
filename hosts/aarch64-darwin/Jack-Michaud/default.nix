@@ -18,6 +18,7 @@
       };
       desktop = {
         terminals.alacritty.enable = true;
+        jankyborders.enable = true;
         apps = {
           obsidian.enable = true;
           code.enable = true;

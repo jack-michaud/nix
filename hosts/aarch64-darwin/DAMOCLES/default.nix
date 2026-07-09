@@ -65,6 +65,7 @@
     };
     desktop = {
       terminals.alacritty.enable = true;
+      jankyborders.enable = true;
     };
   };
 }
