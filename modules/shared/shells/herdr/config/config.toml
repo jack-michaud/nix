@@ -19,8 +19,9 @@ focus_pane_right = "prefix+l"
 [theme]
 # Inherit the host terminal palette — Monokai Pro, defined once in
 # modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
-name = "terminal"
+name = "catppuccin"
 
+auto_switch = false
 [theme.custom]
 accent = "#ffd866" # Monokai yellow
 
