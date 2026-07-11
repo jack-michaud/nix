@@ -3,3 +3,5 @@ result
 logs/
 # Self-referential symlink accidentally created at repo root (./nix -> this repo)
 /nix
+# Claude Code session state (worktrees etc.)
+/.claude/
