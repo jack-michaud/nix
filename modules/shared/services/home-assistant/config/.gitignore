@@ -1,0 +1,21 @@
+# Home Assistant writes runtime state into /config (this directory, since
+# it's bind-mounted from the repo). Only declarative YAML belongs in git.
+/secrets.yaml
+/.storage/
+/.cache/
+/.ha_run.lock
+# Seeded by the service and self-managed by HACS at runtime.
+/custom_components/
+/.cloud/
+/deps/
+/tts/
+/backups/
+/blueprints/
+/image/
+/www/community/
+/.HA_VERSION
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.log.*
