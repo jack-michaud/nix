@@ -58,6 +58,8 @@
           KRONOS = mkHost "aarch64-darwin" ./hosts/aarch64-darwin/DAMOCLES {
             user = "jack";
             hostName = "KRONOS";
+            # Work laptop: no hardware-hacking tools
+            modules.dev.hardware-hacking.enable = false;
           };
         };
 

@@ -1,4 +1,4 @@
-{ user, pkgs, ... }:
+{ user, pkgs, lib, ... }:
 {
     # Determinate already manages the Nix daemon, so nix-darwin shouldn't.
   nix.enable = false;
@@ -64,6 +64,8 @@
     editors = {
       nvim.enable = true;
     };
+    # mkDefault so KRONOS (which reuses this config) can turn it off in flake.nix
+    dev.hardware-hacking.enable = lib.mkDefault true;
     shells = {
       tmux.enable = true;
       zsh.enable = true;
