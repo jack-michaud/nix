@@ -1,3 +1,4 @@
+onboarding = false
 # herdr configuration — managed by nix: modules/shared/shells/herdr
 # (symlinked to the live checkout; `herdr server reload-config` applies edits).
 
