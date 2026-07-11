@@ -50,6 +50,30 @@ alias jclaude='claude " "'
 # Montana Banana pi extension
 alias pimb='pi -e /Users/Jack/Code/github.com/MontanaBanana/pi-mb/.pi/extensions/montana-banana/index.ts'
 
+# fzf-pick a PR that requests my review, then open it in tuicr.
+# Usage: prcr [owner/repo]  (defaults to the repo in the current dir)
+prcr() {
+  local repo="$1" repo_args=()
+  [[ -n "$repo" ]] && repo_args=(--repo "$repo")
+
+  local line
+  line=$(gh pr list "${repo_args[@]}" \
+    --search "review-requested:@me" \
+    --json number,title,author \
+    --template '{{range .}}{{printf "#%v\t%s\t@%s\n" .number .title .author.login}}{{end}}' \
+    | fzf --delimiter='\t' --with-nth='1,2,3' \
+          --prompt='review-requested > ') || return
+  [[ -n "$line" ]] || return
+
+  # Strip leading "#" off the first tab-delimited field to get the PR number.
+  local number="${${line%%$'\t'*}#\#}"
+
+  # tuicr needs owner/repo#number; resolve the repo if it was defaulted.
+  [[ -z "$repo" ]] && { repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner') || return; }
+
+  tuicr pr "$repo#$number"
+}
+
 # Cache `<tool> init`-style output; spawning the tool on every shell is slow.
 # Regenerates when the tool's binary is newer than the cache.
 _cache_init() {  # usage: _cache_init <name> <bin> <command...>

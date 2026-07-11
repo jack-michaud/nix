@@ -42,6 +42,7 @@
     brews = [
       "gh"
       "herdr"
+      "agavra/tap/tuicr"  # TUI code-review tool from the agavra/tap third-party tap
       "tmux"
       "neovim"
       "jj"
