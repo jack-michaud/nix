@@ -20,6 +20,10 @@ focus_pane_right = "prefix+l"
 navigate_workspace_up = "k"
 navigate_workspace_down = "j"
 
+# Match tmux's default '"' horizontal split binding.
+# split_vertical stays default (prefix+v); only horizontal moves off prefix+minus.
+split_horizontal = "prefix+double_quote"
+
 [theme]
 # Inherit the host terminal palette — Monokai Pro, defined once in
 # modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
