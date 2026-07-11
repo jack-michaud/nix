@@ -16,6 +16,10 @@ focus_pane_down = "prefix+j"
 focus_pane_up = "prefix+k"
 focus_pane_right = "prefix+l"
 
+# vi-style movement in the workspace picker (prefix+w), replacing up/down arrows
+navigate_workspace_up = "k"
+navigate_workspace_down = "j"
+
 [theme]
 # Inherit the host terminal palette — Monokai Pro, defined once in
 # modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
@@ -26,7 +30,7 @@ auto_switch = false
 accent = "#ffd866" # Monokai yellow
 
 [ui]
-agent_panel_sort = "priority"
+agent_panel_sort = "spaces"
 accent = "#ffd866"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
