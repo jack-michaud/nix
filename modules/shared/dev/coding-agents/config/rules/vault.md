@@ -1,7 +1,10 @@
+---
+paths: ["@vaultDir@/**"]
+---
+
 # Vault rules
 
-How to work inside Jack's Obsidian vault (its path is listed in the agents
-file, `~/.agents/AGENTS.md`).
+How to work inside Jack's Obsidian vault at `@vaultDir@`.
 
 ## Reading
 

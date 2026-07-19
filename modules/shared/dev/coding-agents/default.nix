@@ -4,7 +4,8 @@ with lib;
 with lib.my;
 let
   cfg = config.modules.dev.coding-agents;
-  rulesDir = "${config.dotfiles.modulesDir}/shared/dev/coding-agents/config/rules";
+  configDir = "${config.dotfiles.modulesDir}/shared/dev/coding-agents/config";
+  rulesDir = "${configDir}/rules";
 
   substVars = ''
     --subst-var-by host ${escapeShellArg config.environment.variables.NIX_FLAKE_HOST} \
@@ -41,7 +42,8 @@ let
     };
 
   rules = {
-    "vault.md" = { };
+    # Substituted so the `paths` trigger globs carry the real vault path.
+    "vault.md" = { substitute = true; };
     "agentsmd-rules.md" = { substitute = true; };
   };
 in {
@@ -59,6 +61,11 @@ in {
       # vendor-specific name Claude Code insists on.
       ".agents/AGENTS.md".source = agentsMd;
       ".claude/CLAUDE.md".source = agentsMd;
+      # pi has no native rules dir; this extension implements the same
+      # contract (frontmatter `paths` triggers) over ~/.agents/rules.
+      ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
+        ln -s ${escapeShellArg "${configDir}/pi-extensions/agent-rules.ts"} $out
+      '';
     } (mapAttrsToList mkAgentRule rules);
   };
 }
