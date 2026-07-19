@@ -60,6 +60,7 @@
             hostName = "KRONOS";
             # Work laptop: no hardware-hacking tools
             modules.dev.hardware-hacking.enable = false;
+            modules.dev.coding-agents.role = "work";
           };
         };
 

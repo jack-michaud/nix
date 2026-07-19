@@ -66,6 +66,9 @@
     };
     # mkDefault so KRONOS (which reuses this config) can turn it off in flake.nix
     dev.hardware-hacking.enable = lib.mkDefault true;
+    # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
+    # overrides the role to "work" in flake.nix.
+    dev.coding-agents.enable = true;
     shells = {
       tmux.enable = true;
       zsh.enable = true;
