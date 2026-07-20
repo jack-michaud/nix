@@ -46,6 +46,41 @@ let
     "vault.md" = { substitute = true; };
     "agentsmd-rules.md" = { substitute = true; };
   };
+
+  # Claude Code loads no-`paths` rules from ~/.claude/rules natively but never
+  # fires path-scoped rules whose globs point outside the project (e.g.
+  # vault.md). This PostToolUse hook implements the same contract as the pi
+  # extension; it points at the checkout so edits apply without a rebuild.
+  globalRuleFilesHook = {
+    matcher = "Read|Edit|Write|NotebookEdit|Glob|Grep";
+    hooks = [{
+      type = "command";
+      command = "python3 '${configDir}/claude-hooks/global-rule-files.py'";
+      timeout = 10;
+    }];
+  };
+  globalRuleFilesHookJson = pkgs.writeText "global-rule-files-hook.json"
+    (builtins.toJSON globalRuleFilesHook);
+
+  # Merged (not symlinked) into ~/.claude/settings.json: the file is mutable —
+  # Claude Code writes enabledPlugins, theme, permissions.allow, etc. into it.
+  # Each run drops PostToolUse entries carrying the marker filename and appends
+  # the current definition; everything else in the file is left alone.
+  mergeGlobalRuleFilesHook = pkgs.writeShellScript "merge-global-rule-files-hook" ''
+    set -euo pipefail
+    settings="$HOME/.claude/settings.json"
+    mkdir -p "$HOME/.claude"
+    [ -s "$settings" ] || echo '{}' > "$settings"
+    ${pkgs.jq}/bin/jq --slurpfile entry ${globalRuleFilesHookJson} '
+      .hooks.PostToolUse = (
+        ((.hooks.PostToolUse // [])
+         | map(select(
+             ((.hooks // []) | map(.command // "") | join(" "))
+             | contains("global-rule-files.py") | not)))
+        + [$entry[0]]
+      )' "$settings" > "$settings.hm-tmp"
+    mv "$settings.hm-tmp" "$settings"
+  '';
 in {
   options.modules.dev.coding-agents = {
     enable = mkBoolOpt false;
@@ -67,5 +102,12 @@ in {
         ln -s ${escapeShellArg "${configDir}/pi-extensions/agent-rules.ts"} $out
       '';
     } (mapAttrsToList mkAgentRule rules);
+
+    home-manager.users.${config.user.name} = { lib, ... }: {
+      home.activation.claudeGlobalRuleFilesHook =
+        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${mergeGlobalRuleFilesHook}
+        '';
+    };
   };
 }
