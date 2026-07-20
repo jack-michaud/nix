@@ -45,6 +45,8 @@ let
     # Substituted so the `paths` trigger globs carry the real vault path.
     "vault.md" = { substitute = true; };
     "agentsmd-rules.md" = { substitute = true; };
+    # Substituted so the body names the real checkout path.
+    "editing-agent-rules.md" = { substitute = true; };
   };
 
   # Claude Code loads no-`paths` rules from ~/.claude/rules natively but never

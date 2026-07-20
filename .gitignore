@@ -5,3 +5,4 @@ logs/
 /nix
 # Claude Code session state (worktrees etc.)
 /.claude/
+__pycache__/
