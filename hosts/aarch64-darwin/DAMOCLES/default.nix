@@ -47,6 +47,7 @@
       "neovim"
       "jj"
       "starship"
+      "ffmpeg"
       "fzf"
       "pyenv"
       "libb2"  # pyenv-built Python links _blake2 against this; zap cleanup removes it otherwise
