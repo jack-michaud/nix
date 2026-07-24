@@ -18,6 +18,12 @@ let
     # package dirs, which `go mod vendor` prunes; the module cache keeps them.
     proxyVendor = true;
     vendorHash = "sha256-zV9MMjlgyDlZAFbRi7SRDlv2khzFs7IontMeR/vfQ4M=";
+    # Default `go build ./...` walks the whole source tree, including
+    # eval/results/**, which is its own nested module (eval/results/go.mod)
+    # and isn't part of the main module's package set. Scope to the CLI's
+    # root package so the build doesn't try (and fail) to build across that
+    # module boundary.
+    subPackages = [ "." ];
     nativeCheckInputs = [ pkgs.git ];  # e2e test shells out to git
   };
 in {
