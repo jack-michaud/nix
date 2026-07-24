@@ -20,11 +20,11 @@
     "comment-trainer": {
       "flake": false,
       "locked": {
-        "lastModified": 1784851028,
-        "narHash": "sha256-6Bqui5NARs3mfVNbSOSyb2J92kOzlLiQheCf84IEhY4=",
+        "lastModified": 1784853792,
+        "narHash": "sha256-zc+I6bMjjU/pSJz12qJb1jesAleCUCWmONc6eHDOUOQ=",
         "ref": "refs/heads/main",
-        "rev": "efc89cb6430451e9cc825b069fa653aeeac02654",
-        "revCount": 13,
+        "rev": "bbe02e7a88796c550b10ada0c2935a5c1d5fc833",
+        "revCount": 18,
         "type": "git",
         "url": "ssh://git@github.com/jack-michaud/comment-trainer"
       },
