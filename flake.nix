@@ -20,6 +20,13 @@
       flake = false;
     };
 
+    # Private Node/TS tool with its own flake (buildNpmPackage output);
+    # fetched over ssh so the flake can read the private repo.
+    agent-harness = {
+      url = "git+ssh://git@github.com/jack-michaud/agent-harness";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
