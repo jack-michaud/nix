@@ -14,6 +14,12 @@
 
     nix-homebrew.url = "github:zhaofengli/nix-homebrew";
 
+    # Private Go tool; fetched over ssh so the flake can read the private repo.
+    comment-trainer = {
+      url = "git+ssh://git@github.com/jack-michaud/comment-trainer";
+      flake = false;
+    };
+
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let

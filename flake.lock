@@ -17,6 +17,22 @@
         "type": "github"
       }
     },
+    "comment-trainer": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784851028,
+        "narHash": "sha256-6Bqui5NARs3mfVNbSOSyb2J92kOzlLiQheCf84IEhY4=",
+        "ref": "refs/heads/main",
+        "rev": "efc89cb6430451e9cc825b069fa653aeeac02654",
+        "revCount": 13,
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/comment-trainer"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/comment-trainer"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -110,6 +126,7 @@
     },
     "root": {
       "inputs": {
+        "comment-trainer": "comment-trainer",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",

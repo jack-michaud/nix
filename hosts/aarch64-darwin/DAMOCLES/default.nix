@@ -70,6 +70,9 @@
     # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
     # overrides the role to "work" in flake.nix.
     dev.coding-agents.enable = true;
+    # Private Go tool (flake input, built from source); KRONOS gets it too
+    # since it reuses this config.
+    dev.comment-trainer.enable = true;
     shells = {
       tmux.enable = true;
       zsh.enable = true;
