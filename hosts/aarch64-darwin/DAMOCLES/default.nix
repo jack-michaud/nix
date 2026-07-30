@@ -41,6 +41,9 @@
     onActivation.extraFlags = [ "--force" ];
     brews = [
       "gh"
+      "gh-axi"
+      "gnupg"
+      "pango"
       "herdr"
       "agavra/tap/tuicr"  # TUI code-review tool from the agavra/tap third-party tap
       "tmux"

@@ -19,7 +19,7 @@ nix build --no-link ".#darwinConfigurations.${host}.system"
 # socket. Root can read the file fine (root ignores unix permission bits) —
 # it just doesn't otherwise know the file exists, since sudo's env_reset
 # resets $HOME to root's, so `~` in ~/.ssh/config resolves to /var/root.
-export GIT_SSH_COMMAND="ssh -F /dev/null -i ${HOME}/.ssh/id_ecdsa -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts"
+export GIT_SSH_COMMAND="ssh -F /dev/null -i ${HOME}/.ssh/id_rsa -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts"
 
 if command -v darwin-rebuild >/dev/null 2>&1; then
   sudo --preserve-env=GIT_SSH_COMMAND darwin-rebuild switch --flake ".#${host}"
