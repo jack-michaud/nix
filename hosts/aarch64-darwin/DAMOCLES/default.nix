@@ -41,7 +41,6 @@
     onActivation.extraFlags = [ "--force" ];
     brews = [
       "gh"
-      "gh-axi"
       "gnupg"
       "pango"
       "herdr"

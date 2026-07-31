@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1785411864,
-        "narHash": "sha256-WkNoHTwpkcByCdfm5XRbHAGSjHUEIYzUSpYhVIm/Png=",
+        "lastModified": 1785430142,
+        "narHash": "sha256-4w2ps7p6L8q7aM5jvMF8cUqEsBX+WuAjQtvVGHoie9k=",
         "ref": "refs/heads/main",
-        "rev": "a6aff8202876a2a946961b3b33a538390c5a0abe",
-        "revCount": 114,
+        "rev": "18abebd7e031ac1364bd78494359b187631ea2e9",
+        "revCount": 116,
         "type": "git",
         "url": "ssh://git@github.com/jack-michaud/agent-harness"
       },

@@ -64,6 +64,13 @@ let
   globalRuleFilesHookJson = pkgs.writeText "global-rule-files-hook.json"
     (builtins.toJSON globalRuleFilesHook);
 
+  # Pi installs packages declared in settings on its next startup. Pin the git
+  # ref so rebuilding this config always selects the reviewed revision.
+  piPackages = [
+    "git:github.com/algal/pi-openai-server-compaction@8a3de2f3b0c178fdd6f73f2f94172dfc3943e466"
+  ];
+  piPackagesJson = pkgs.writeText "pi-packages.json" (builtins.toJSON piPackages);
+
   # Merged (not symlinked) into ~/.claude/settings.json: the file is mutable —
   # Claude Code writes enabledPlugins, theme, permissions.allow, etc. into it.
   # Each run drops PostToolUse entries carrying the marker filename and appends
@@ -81,6 +88,24 @@ let
              | contains("global-rule-files.py") | not)))
         + [$entry[0]]
       )' "$settings" > "$settings.hm-tmp"
+    mv "$settings.hm-tmp" "$settings"
+  '';
+
+  # Keep Pi's mutable preferences while declaratively adding global packages.
+  mergePiPackages = pkgs.writeShellScript "merge-pi-packages" ''
+    set -euo pipefail
+    settings="$HOME/.pi/agent/settings.json"
+    mkdir -p "$HOME/.pi/agent"
+    [ -s "$settings" ] || echo '{}' > "$settings"
+    ${pkgs.jq}/bin/jq --slurpfile packages ${piPackagesJson} '
+      .packages = (
+        [(.packages // [])[] | select(
+          ((if type == "string" then . else (.source // "") end)
+           | startswith("git:github.com/algal/pi-openai-server-compaction"))
+          | not
+        )] + $packages[0]
+      )
+    ' "$settings" > "$settings.hm-tmp"
     mv "$settings.hm-tmp" "$settings"
   '';
 in {
@@ -106,10 +131,14 @@ in {
     } (mapAttrsToList mkAgentRule rules);
 
     home-manager.users.${config.user.name} = { lib, ... }: {
-      home.activation.claudeGlobalRuleFilesHook =
-        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      home.activation = {
+        claudeGlobalRuleFilesHook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
           run ${mergeGlobalRuleFilesHook}
         '';
+        piPackages = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${mergePiPackages}
+        '';
+      };
     };
   };
 }
