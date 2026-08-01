@@ -1,9 +1,34 @@
-{ config, options, lib, pkgs, ... }:
+{ config, options, lib, pkgs, inputs, ... }:
 
 with lib;
 with lib.my;
 
-let cfg = config.modules.shells.herdr;
+let
+  cfg = config.modules.shells.herdr;
+
+  jjWorkspaceSrc = inputs.herdr-plugin-jj-workspace;
+
+  # Build the plugin in nix instead of `herdr plugin install`, which shells
+  # out to the system cargo at install time — the rustup toolchain can be
+  # older than the plugin's deps require (rustc 1.87 vs ratatui's 1.88).
+  jjWorkspace = pkgs.rustPlatform.buildRustPackage {
+    pname = "herdr-plugin-jj-workspace";
+    version = jjWorkspaceSrc.shortRev or "unstable";
+    src = jjWorkspaceSrc;
+    cargoLock.lockFile = jjWorkspaceSrc + "/Cargo.lock";
+  };
+
+  # The manifest's action commands are relative (`./target/release/...`) and
+  # herdr resolves them against the plugin root, so mirror the layout a
+  # `cargo build --release` would have produced. The manifest must be a real
+  # file, not a symlink: herdr canonicalizes the manifest path when deriving
+  # the plugin root, and a symlink would resolve it back to the bare source
+  # tree (which has no target/release binary).
+  jjWorkspacePluginDir = pkgs.runCommandLocal "herdr-plugin-jj-workspace-dir" { } ''
+    mkdir -p $out/target/release
+    cp ${jjWorkspaceSrc}/herdr-plugin.toml $out/herdr-plugin.toml
+    ln -s ${jjWorkspace}/bin/jj-workspace $out/target/release/jj-workspace
+  '';
 in {
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
@@ -19,5 +44,25 @@ in {
       pkgs.runCommandLocal "herdr-config" { } ''
         ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/config.toml"} $out
       '';
+
+    # Register the nix-built plugin with herdr. `plugin link` doesn't build
+    # (we already did) and is idempotent: re-linking the same plugin id
+    # updates the registered plugin root, so plugin updates converge on the
+    # next rebuild. The registry (plugins.json) stays herdr-managed runtime
+    # state, so we don't touch it directly.
+    home-manager.users.${config.user.name} = { lib, ... }: {
+      home.activation.herdrJjWorkspacePlugin =
+        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          herdrBin="$(command -v herdr || true)"
+          if [ -z "$herdrBin" ] && [ -x /opt/homebrew/bin/herdr ]; then
+            herdrBin=/opt/homebrew/bin/herdr
+          fi
+          if [ -n "$herdrBin" ]; then
+            run "$herdrBin" plugin link ${jjWorkspacePluginDir}
+          else
+            echo "herdr not on PATH; skipping jj-workspace plugin link"
+          fi
+        '';
+    };
   };
 }

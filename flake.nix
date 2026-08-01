@@ -27,6 +27,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
+    # Built in nix (see modules/shared/shells/herdr) rather than via
+    # `herdr plugin install`, which shells out to the system cargo.
+    herdr-plugin-jj-workspace = {
+      url = "github:NathanFlurry/herdr-plugin-jj-workspace";
+      flake = false;
+    };
+
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
