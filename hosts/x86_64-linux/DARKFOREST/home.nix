@@ -25,6 +25,8 @@ in
   imports = [
     ../../../modules/shared/shells/herdr
     ../../../modules/shared/dev/coding-agents
+    ../../../modules/shared/dev/agent-harness.nix
+    ../../../modules/shared/dev/comment-trainer.nix
   ];
 
   # ---- compat: system-module options the shared modules read -------------
@@ -43,6 +45,14 @@ in
       type = types.attrsOf types.str;
       default = { };
       description = "System env vars; shared modules read NIX_FLAKE_HOST.";
+    };
+    # agent-harness / comment-trainer install via `environment.systemPackages`
+    # (a NixOS/darwin option). Declare it here and fold it into the native
+    # `home.packages` below.
+    environment.systemPackages = mkOption {
+      type = types.listOf types.package;
+      default = [ ];
+      description = "System packages; mapped to home.packages below.";
     };
     # coding-agents defines `home-manager.users.<user>.home.activation`
     # (there's no `home.activation` alias at the system level). Catch it here
@@ -74,11 +84,27 @@ in
     };
     environment.variables.NIX_FLAKE_HOST = "DARKFOREST";
 
-    modules.shells.herdr.enable = true;
+    # herdr's config module never installs the herdr binary — on darwin that
+    # comes from Homebrew. On Linux take it from the `unstable` overlay
+    # (nixpkgs master), which tracks a newer herdr than the pinned nixpkgs
+    # ships. Setting `package` also makes the plugin-link activation reference
+    # the store path directly: home-manager's activation script replaces PATH
+    # with a fixed set of store paths, so a `command -v herdr` lookup there
+    # would never find the profile-installed binary.
+    modules.shells.herdr = {
+      enable = true;
+      package = pkgs.unstable.herdr;
+    };
     modules.dev.coding-agents = {
       enable = true;
       role = "personal";
     };
+    # Private tools from flake inputs (built from source), mirroring DAMOCLES.
+    modules.dev.agent-harness.enable = true;
+    modules.dev.comment-trainer.enable = true;
+
+    home.packages = config.environment.systemPackages
+      ++ [ config.modules.shells.herdr.package ];
 
     # Bridge: system modules add activation under home-manager.users.<user>;
     # in standalone HM those must land in the top-level home.activation.

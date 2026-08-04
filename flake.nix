@@ -83,6 +83,9 @@
       in {
         "jack@DARKFOREST" = home-manager.lib.homeManagerConfiguration {
           pkgs = hmPkgs;
+          # Shared dev modules (agent-harness, comment-trainer, herdr plugin)
+          # read flake inputs directly, so forward them into the HM eval.
+          extraSpecialArgs = { inherit inputs; };
           modules = [ ./hosts/x86_64-linux/DARKFOREST/home.nix ];
         };
       };

@@ -32,6 +32,13 @@ let
 in {
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
+
+    # The herdr binary itself isn't installed by this module — on darwin it
+    # comes from Homebrew, so activation looks it up at runtime. Hosts that
+    # get herdr from nixpkgs set this instead: home-manager's activation
+    # script overwrites PATH with a fixed set of store paths (the user profile
+    # is never on it), so a PATH lookup can't find a nix-installed herdr.
+    package = mkOpt (types.nullOr types.package) null;
   };
 
   config = mkIf cfg.enable {
@@ -51,16 +58,21 @@ in {
     # next rebuild. The registry (plugins.json) stays herdr-managed runtime
     # state, so we don't touch it directly.
     home-manager.users.${config.user.name} = { lib, ... }: {
+      # After installPackages, so a herdr from `home.packages` is on disk by
+      # the time we shell out to it.
       home.activation.herdrJjWorkspacePlugin =
-        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          herdrBin="$(command -v herdr || true)"
+        lib.hm.dag.entryAfter [ "installPackages" ] ''
+          herdrBin=${optionalString (cfg.package != null) "${cfg.package}/bin/herdr"}
+          if [ -z "$herdrBin" ]; then
+            herdrBin="$(command -v herdr || true)"
+          fi
           if [ -z "$herdrBin" ] && [ -x /opt/homebrew/bin/herdr ]; then
             herdrBin=/opt/homebrew/bin/herdr
           fi
           if [ -n "$herdrBin" ]; then
             run "$herdrBin" plugin link ${jjWorkspacePluginDir}
           else
-            echo "herdr not on PATH; skipping jj-workspace plugin link"
+            echo "herdr not found; skipping jj-workspace plugin link"
           fi
         '';
     };
