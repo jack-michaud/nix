@@ -47,6 +47,25 @@
         in mapModules ./packages (p: _pkgs.callPackage p { });
       mkPackagesWithOverlays = system: pkgs system;
 
+      # Standalone home-manager for non-NixOS Linux hosts (e.g. Arch). The
+      # shared modules are system modules, so hosts/x86_64-linux/<host>/home.nix
+      # carries a compat bridge; see that file. Apply later (outside this task)
+      # with `home-manager switch --flake .#"jack@DARKFOREST"`.
+      homeConfigurations = let
+        system = "x86_64-linux";
+        # pkgs already carries the flake overlays (unstable, my); extend its
+        # lib with `my` so the shared modules' `with lib.my;` resolves.
+        basePkgs = pkgs system;
+        hmPkgs = basePkgs // {
+          lib = basePkgs.lib.extend (_final: _prev: { my = self.lib; });
+        };
+      in {
+        "jack@DARKFOREST" = home-manager.lib.homeManagerConfiguration {
+          pkgs = hmPkgs;
+          modules = [ ./hosts/x86_64-linux/DARKFOREST/home.nix ];
+        };
+      };
+
       darwinConfigurations = mapHosts ./hosts/x86_64-darwin "x86_64-darwin" { }
         // mapHosts ./hosts/aarch64-darwin "aarch64-darwin" {
           # Per-machine user accounts, keyed by hostname.
