@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "agent-harness": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785430142,
+        "narHash": "sha256-4w2ps7p6L8q7aM5jvMF8cUqEsBX+WuAjQtvVGHoie9k=",
+        "ref": "refs/heads/main",
+        "rev": "18abebd7e031ac1364bd78494359b187631ea2e9",
+        "revCount": 116,
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/agent-harness"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/agent-harness"
+      }
+    },
     "brew-src": {
       "flake": false,
       "locked": {
@@ -14,6 +34,38 @@
         "owner": "Homebrew",
         "ref": "6.0.1",
         "repo": "brew",
+        "type": "github"
+      }
+    },
+    "comment-trainer": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784982024,
+        "narHash": "sha256-lk8WaNqeVeQ9P3hxmh07Gce88Ec2B9FhenbRr/QFiFc=",
+        "ref": "refs/heads/main",
+        "rev": "17aaa43b8b21ca4f7c4140c44d4320003fcdf99c",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/comment-trainer"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/jack-michaud/comment-trainer"
+      }
+    },
+    "herdr-plugin-jj-workspace": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783487155,
+        "narHash": "sha256-xspdQfcwTEdUwZ0nWAfrdvz5IBVNVyMkmpmpzkUl0LE=",
+        "owner": "NathanFlurry",
+        "repo": "herdr-plugin-jj-workspace",
+        "rev": "a9f1d3bcdaa2354e336a5173da85cbe4970c0f2e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NathanFlurry",
+        "repo": "herdr-plugin-jj-workspace",
         "type": "github"
       }
     },
@@ -110,6 +162,9 @@
     },
     "root": {
       "inputs": {
+        "agent-harness": "agent-harness",
+        "comment-trainer": "comment-trainer",
+        "herdr-plugin-jj-workspace": "herdr-plugin-jj-workspace",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",

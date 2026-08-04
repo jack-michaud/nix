@@ -14,6 +14,27 @@
 
     nix-homebrew.url = "github:zhaofengli/nix-homebrew";
 
+    # Private Go tool; fetched over ssh so the flake can read the private repo.
+    comment-trainer = {
+      url = "git+ssh://git@github.com/jack-michaud/comment-trainer";
+      flake = false;
+    };
+
+    # Private Node/TS tool with its own flake (buildNpmPackage output);
+    # fetched over ssh so the flake can read the private repo.
+    agent-harness = {
+      url = "git+ssh://git@github.com/jack-michaud/agent-harness";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
+    # Built in nix (see modules/shared/shells/herdr) rather than via
+    # `herdr plugin install`, which shells out to the system cargo.
+    herdr-plugin-jj-workspace = {
+      url = "github:NathanFlurry/herdr-plugin-jj-workspace";
+      flake = false;
+    };
+
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let

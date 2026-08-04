@@ -41,12 +41,15 @@
     onActivation.extraFlags = [ "--force" ];
     brews = [
       "gh"
+      "gnupg"
+      "pango"
       "herdr"
       "agavra/tap/tuicr"  # TUI code-review tool from the agavra/tap third-party tap
       "tmux"
       "neovim"
       "jj"
       "starship"
+      "ffmpeg"
       "fzf"
       "pyenv"
       "libb2"  # pyenv-built Python links _blake2 against this; zap cleanup removes it otherwise
@@ -69,6 +72,12 @@
     # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
     # overrides the role to "work" in flake.nix.
     dev.coding-agents.enable = true;
+    # Private Go tool (flake input, built from source); KRONOS gets it too
+    # since it reuses this config.
+    dev.comment-trainer.enable = true;
+    # Private Node/TS tool (flake input, builds its own buildNpmPackage
+    # output); KRONOS gets it too since it reuses this config.
+    dev.agent-harness.enable = true;
     shells = {
       tmux.enable = true;
       zsh.enable = true;

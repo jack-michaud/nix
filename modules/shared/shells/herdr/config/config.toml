@@ -25,6 +25,26 @@ navigate_workspace_down = "j"
 # split_vertical stays default (prefix+v); only horizontal moves off prefix+minus.
 split_horizontal = "prefix+double_quote"
 
+# jj-workspace plugin (built and linked by nix — see ../default.nix).
+# Actions are unbound in stock herdr; bindings from the plugin README.
+[[keys.command]]
+key = "prefix+a"
+type = "plugin_action"
+command = "nathanflurry.jj-workspace.new-tab"
+description = "new jj workspace (in tab)"
+
+[[keys.command]]
+key = "prefix+shift+a"
+type = "plugin_action"
+command = "nathanflurry.jj-workspace.new"
+description = "new jj workspace"
+
+[[keys.command]]
+key = "prefix+d"
+type = "plugin_action"
+command = "nathanflurry.jj-workspace.remove"
+description = "remove jj workspace"
+
 [theme]
 # Inherit the host terminal palette — Monokai Pro, defined once in
 # modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
