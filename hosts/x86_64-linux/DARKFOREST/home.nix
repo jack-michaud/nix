@@ -27,6 +27,7 @@ in
     ../../../modules/shared/dev/coding-agents
     ../../../modules/shared/dev/agent-harness.nix
     ../../../modules/shared/dev/comment-trainer.nix
+    ./phone-mic.nix
   ];
 
   # ---- compat: system-module options the shared modules read -------------
