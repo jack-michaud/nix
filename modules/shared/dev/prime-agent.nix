@@ -29,7 +29,12 @@ let
     # by store path. node/npm on PATH is also what keeps the installer's
     # interactive "Install Node.js and npm? [Y/n]" branch from ever being
     # reached — activation has no terminal to answer it.
-    export PATH=${makeBinPath [ pkgs.nodejs pkgs.curl pkgs.coreutils pkgs.gnutar pkgs.gzip pkgs.gnused pkgs.gnugrep pkgs.which ]}:$PATH
+    # gawk is NOT optional: the installer selects the release's checksum line
+    # with `awk -v file=... '$2 == file {...}'` before verifying the download,
+    # so without it the install dies at "awk: command not found". It only
+    # survived on Linux because the activation PATH happened to include
+    # /usr/bin; nix-darwin's does not, which is where it actually broke.
+    export PATH=${makeBinPath [ pkgs.bash pkgs.nodejs pkgs.curl pkgs.coreutils pkgs.gawk pkgs.gnutar pkgs.gzip pkgs.gnused pkgs.gnugrep pkgs.which ]}:$PATH
 
     version=${escapeShellArg cfg.version}
     prefix=${escapeShellArg prefix}
@@ -80,7 +85,10 @@ let
       exit 0
     fi
 
-    if ! sh "$tmp/install.sh"; then
+    # Explicit interpreter: `sh` is not on the pinned PATH either, and relying
+    # on the inherited one is the same trap as awk (it resolved to /usr/bin/sh
+    # on Linux and would not have on a stricter activation environment).
+    if ! ${pkgs.bash}/bin/sh "$tmp/install.sh"; then
       warn "installer failed; leaving the current install alone."
       exit 0
     fi
@@ -103,8 +111,9 @@ in {
     prefix = mkOpt types.str "${config.user.home}/.local/share/prime-agent";
     command = mkOpt types.str "prime-agent";
     # The installer can also provision uv/Python/ipykernel for the agent's
-    # IPython tool. Off by default so a switch stays a small download; the
-    # agent prepares the kernel on first use instead.
+    # IPython tool. Off by default so a switch stays a small download: `uv`
+    # comes from nixpkgs below, and the agent builds the kernel venv itself on
+    # first use. Turning this on only moves that one-time venv build earlier.
     bootstrapKernel = mkBoolOpt false;
   };
 
@@ -117,11 +126,36 @@ in {
       # The installed CLI is a `#!/usr/bin/env node` script, so it needs a
       # node at *runtime*, not just at install time. Ship the same nodejs the
       # installer runs against rather than depending on a distro package.
-      home.packages = [ pkgs.nodejs ];
+      # `uv` is NOT optional, despite bootstrapKernel defaulting to false. The
+      # agent's IPython tool calls ensureUv() (dist/core/kernel/bootstrap.js),
+      # which looks for uv on PATH, then at ~/.local/bin/uv, and otherwise
+      # either PROMPTS to install it or throws:
+      #
+      #   "uv is required to set up the Python kernel. Install uv yourself ...
+      #    or set PRIME_AGENT_INSTALL_UV=1 to let prime-agent run that installer."
+      #
+      # A prompt is not an option for an agent running unattended, so shipping
+      # uv declaratively satisfies that first branch. It also keeps a second
+      # `curl | sh` (astral.sh's uv installer) out of the picture entirely -
+      # one impure vendor installer in this module is enough.
+      home.packages = [ pkgs.nodejs pkgs.uv ];
 
       # `npm install -g` puts the CLI in <prefix>/bin, which nothing else adds
       # to PATH (the installer's own profile edit is deliberately neutralised).
       home.sessionPath = [ "${prefix}/bin" ];
+
+      # ...but `home.sessionPath` only ever writes `hm-session-vars.sh`, which
+      # a POSIX shell sources and fish CANNOT. Jack's login shell is fish
+      # (/usr/bin/fish, and `modules.shells.fish` is not enabled on DARKFOREST,
+      # so home-manager does not own that config either) - which is why the bin
+      # dir was missing from PATH after a switch even though the generation
+      # exported it correctly. fish auto-sources conf.d/*.fish regardless of who
+      # manages the rest of its config, so put it there too. `fish_add_path` is
+      # idempotent, so re-running or nesting shells cannot duplicate the entry.
+      home.file.".config/fish/conf.d/prime-agent.fish".text = ''
+        # Managed by modules.dev.prime-agent - do not edit.
+        fish_add_path --global --prepend ${prefix}/bin
+      '';
 
       home.activation = {
         # `run` honours $DRY_RUN_CMD, so `home-manager build` / dry-activate
