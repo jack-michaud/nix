@@ -139,5 +139,19 @@ export PATH=$HOME/.opencode/bin:$PATH
 # prompt
 command -v starship > /dev/null && _cache_init starship-init starship starship init zsh --print-full-init
 
+# home-manager's session variables - PATH entries from `home.sessionPath`, and
+# anything in `home.sessionVariables`. Nothing else sources this: home-manager
+# only wires it up automatically when IT generates ~/.zshrc, and this file is
+# hand-written and symlinked in instead. Without this, a module that adds a
+# PATH entry the correct way (as modules.dev.prime-agent does) silently has no
+# effect in a zsh login shell. The file guards itself against double-sourcing.
+# Standalone home-manager uses the first path; nix-darwin's per-user profile
+# the second.
+for _hm_vars in ~/.nix-profile/etc/profile.d/hm-session-vars.sh \
+                /etc/profiles/per-user/$USER/etc/profile.d/hm-session-vars.sh; do
+  [ -f "$_hm_vars" ] && source "$_hm_vars"
+done
+unset _hm_vars
+
 # Machine-local overrides and secret env vars (not tracked in nix config)
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
