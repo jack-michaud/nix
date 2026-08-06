@@ -162,6 +162,14 @@ async def find_pr(repo: str = ".", head: Optional[str] = None) -> Optional[dict]
     return (open_prs or prs or [None])[0]
 
 
+async def _default_branch(repo: str = ".") -> Optional[str]:
+    """The repo's default branch per `gh`, or None when it cannot be determined."""
+    r = await _gh(["repo", "view", "--json", "defaultBranchRef",
+                   "-q", ".defaultBranchRef.name"], repo=repo, check=False)
+    name = (r["out"] or "").strip()
+    return name or None
+
+
 async def open_pr(title: str, body: str = "", repo: str = ".",
                   head: Optional[str] = None, base: Optional[str] = None,
                   draft: bool = False) -> dict:
@@ -169,6 +177,17 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
     head = head or await current_bookmark(repo=repo)
     if not head:
         raise JjShipError("no bookmark to open a PR for - pass head= explicitly")
+    # `current_bookmark` reads the bookmark on `@` or `@-`, so after a
+    # `jj new main` (the usual "start something else" move) it resolves to the
+    # DEFAULT branch and `gh pr create --head main` fails with the unhelpful
+    # "GraphQL: No commits between main and main". Catch it here and say what
+    # to do about it.
+    default = await _default_branch(repo=repo)
+    if default and head == default and not base:
+        raise JjShipError(
+            f"refusing to open a PR from {head!r}, the repo's default branch - "
+            f"the working copy has probably moved off the feature bookmark "
+            f"(e.g. after `jj new {default}`). Pass head='<bookmark>' explicitly.")
     existing = await find_pr(repo=repo, head=head)
     if existing and existing.get("state") == "OPEN":
         return {**existing, "created": False}
