@@ -53,6 +53,21 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
 
 ## Notes
 
+**Pass `head=` once the working copy has moved.** `open_pr` infers the branch
+from the bookmark on `@` or `@-`, which is right immediately after `commit`, but
+after a `jj new main` it resolves to the DEFAULT branch - and `gh pr create
+--head main` fails with the opaque `GraphQL: No commits between main and main`.
+The skill now refuses that case with an explanation instead of passing it to
+`gh`; supply `head="<bookmark>"` explicitly when shipping something you finished
+earlier.
+
+Related jj sharp edge, same cause: a colocated jj repo leaves git on a detached
+HEAD, so any `gh` subcommand that infers the current branch fails
+(`gh pr merge --delete-branch` reports `could not determine current branch`).
+The merge still lands; delete the remote branch with
+`gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<branch>`.
+
+
 - Binaries are overridable with the `JJ_BIN` / `GH_BIN` environment variables.
 - Every failure raises `jj_ship.JjShipError` carrying the failing argv and its stderr.
 - Fixing CI or answering a review is *your* job: `watch()` reports, it does not act.
