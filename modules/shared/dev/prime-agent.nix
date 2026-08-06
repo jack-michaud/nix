@@ -103,8 +103,9 @@ in {
     prefix = mkOpt types.str "${config.user.home}/.local/share/prime-agent";
     command = mkOpt types.str "prime-agent";
     # The installer can also provision uv/Python/ipykernel for the agent's
-    # IPython tool. Off by default so a switch stays a small download; the
-    # agent prepares the kernel on first use instead.
+    # IPython tool. Off by default so a switch stays a small download: `uv`
+    # comes from nixpkgs below, and the agent builds the kernel venv itself on
+    # first use. Turning this on only moves that one-time venv build earlier.
     bootstrapKernel = mkBoolOpt false;
   };
 
@@ -117,7 +118,19 @@ in {
       # The installed CLI is a `#!/usr/bin/env node` script, so it needs a
       # node at *runtime*, not just at install time. Ship the same nodejs the
       # installer runs against rather than depending on a distro package.
-      home.packages = [ pkgs.nodejs ];
+      # `uv` is NOT optional, despite bootstrapKernel defaulting to false. The
+      # agent's IPython tool calls ensureUv() (dist/core/kernel/bootstrap.js),
+      # which looks for uv on PATH, then at ~/.local/bin/uv, and otherwise
+      # either PROMPTS to install it or throws:
+      #
+      #   "uv is required to set up the Python kernel. Install uv yourself ...
+      #    or set PRIME_AGENT_INSTALL_UV=1 to let prime-agent run that installer."
+      #
+      # A prompt is not an option for an agent running unattended, so shipping
+      # uv declaratively satisfies that first branch. It also keeps a second
+      # `curl | sh` (astral.sh's uv installer) out of the picture entirely -
+      # one impure vendor installer in this module is enough.
+      home.packages = [ pkgs.nodejs pkgs.uv ];
 
       # `npm install -g` puts the CLI in <prefix>/bin, which nothing else adds
       # to PATH (the installer's own profile edit is deliberately neutralised).
