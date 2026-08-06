@@ -41,6 +41,20 @@ let
       ".claude/rules/${name}".source = source;
     };
 
+  # Prime Agent reads skills from ~/.prime/agent/skills/<name>/SKILL.md, and
+  # installs a Python-backed skill's package into its kernel venv from the same
+  # directory. Each skill in config/skills/ is deployed as a live symlink into
+  # the checkout (the same out-of-store trick the rules use), so editing a skill
+  # applies to the next agent session without a rebuild. The set is read off the
+  # filesystem, so adding a skill needs no edit to this file.
+  mkAgentSkill = name: {
+    ".prime/agent/skills/${name}".source = pkgs.runCommandLocal name { } ''
+      ln -s ${escapeShellArg "${configDir}/skills/${name}"} $out
+    '';
+  };
+  skillNames = attrNames
+    (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/skills));
+
   rules = {
     # Substituted so the `paths` trigger globs carry the real vault path.
     "vault.md" = { substitute = true; };
@@ -128,7 +142,7 @@ in {
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
         ln -s ${escapeShellArg "${configDir}/pi-extensions/agent-rules.ts"} $out
       '';
-    } (mapAttrsToList mkAgentRule rules);
+    } (mapAttrsToList mkAgentRule rules ++ map mkAgentSkill skillNames);
 
     home-manager.users.${config.user.name} = { lib, ... }: {
       home.activation = {
