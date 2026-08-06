@@ -34,6 +34,11 @@ await pr_watch.unwatch(all=True)                   # also cancels the heartbeat
 await pr_watch.watch_via_child(repo="/path/to/repo", pr=2)   # push, free while idle
 ```
 
+Stop a watcher with `await pr_watch.stop_watchers("pr-watcher")` rather than
+hand-rolling the lookup: an `RLMSubagent` exposes `session_name`, and its `name`
+attribute is `None`, so filtering on `name` silently matches nothing and leaves
+the child running.
+
 The child makes exactly one call - `await pr_watch.serve(...)` - which blocks for
 hours, polls `gh` inside that single cell, and calls `agent_message.send(...,
 receiver_role="parent")` from inside the still-running cell when a burst settles.

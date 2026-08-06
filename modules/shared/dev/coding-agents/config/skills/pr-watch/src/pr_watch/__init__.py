@@ -401,6 +401,28 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
             "note": "The child messages you when activity settles; never poll it."}
 
 
+async def stop_watchers(name: str = "pr-watcher", exact: bool = False) -> str:
+    """Delete watcher sub-agents by SESSION NAME, matching by prefix unless exact.
+
+    Sharp edge this exists for: an `RLMSubagent` from `rlm.list_subagents()`
+    exposes `session_name`, and its `name` attribute is None. Matching on `name`
+    silently selects nothing, so a "delete the old watcher" step no-ops and
+    leaves a stale child running - observed live, as duplicate notifications
+    from a watcher that was believed deleted.
+    """
+    import rlm  # kernel-only
+
+    stopped = []
+    for sub in await rlm.list_subagents():
+        session_name = getattr(sub, "session_name", None) or ""
+        hit = session_name == name if exact else session_name.startswith(name)
+        if hit and getattr(sub, "status", None) == "running":
+            await rlm.delete_subagent(sub)
+            stopped.append(f"{session_name} ({getattr(sub, 'rlm_child_id', '?')})")
+    return ("pr-watch: stopped " + ", ".join(stopped)) if stopped else \
+        f"pr-watch: no running sub-agent whose session_name matches {name!r}"
+
+
 async def run(action: str = "poll", repo: str = ".", pr: str = "",
               quiet_seconds: float = DEFAULT_QUIET_SECONDS,
               interval: str = "3m", seed: bool = True) -> str:
