@@ -13,6 +13,7 @@ sees the new comments, and answers them.
 ```python
 await pr_watch.watch(repo="/path/to/repo", pr=2)   # arms the heartbeat too
 await pr_watch.poll()                              # what the heartbeat runs
+await pr_watch.ack(repo="/path/to/repo", pr=2)     # after you post a reply
 await pr_watch.watching()
 await pr_watch.unwatch(repo="/path/to/repo", pr=2)
 await pr_watch.unwatch(all=True)                   # also cancels the heartbeat
@@ -26,6 +27,9 @@ eight inline comments over two minutes wakes the agent **once**, with all eight,
 after they stop - instead of eight interrupted turns racing a half-written
 review. Items reported once are marked seen and never repeat.
 
+- **`ack()` after replying.** The agent comments through the same GitHub account
+  as its human, so its own reply reads as new activity and would wake it up to
+  answer itself. `poll()` marks what it reports; `ack()` covers what you posted.
 - The heartbeat runs every 3 minutes in `follow_up` mode, so it never interrupts
   work in progress.
 - Watched: issue comments, review bodies, and comments on **unresolved** review

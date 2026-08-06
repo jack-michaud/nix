@@ -232,6 +232,27 @@ async def poll(mark_seen: bool = True) -> str:
     return "\n".join(ready_lines + (["", "still settling:"] + holding if holding else []))
 
 
+async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False) -> str:
+    """Mark everything currently on a PR as seen, without reporting it.
+
+    Call this right after you post a reply. The agent comments through the same
+    GitHub account as its human, so its OWN reply would otherwise read as new
+    activity and wake it up to answer itself.
+    """
+    state = _load()
+    keys = list(state["watches"]) if all else [_key(str(Path(repo).resolve()), pr)]
+    acked = 0
+    for key in keys:
+        entry = state["watches"].get(key)
+        if entry is None:
+            continue
+        items = await _activity(entry["repo"], entry["pr"])
+        entry["seen"] = sorted({i["id"] for i in items if i.get("id")})
+        acked += 1
+    _save(state)
+    return f"pr-watch: acknowledged current activity on {acked} watch(es)."
+
+
 async def watching() -> str:
     """List the watched PRs and their debounce windows."""
     state = _load()
@@ -281,6 +302,8 @@ async def run(action: str = "poll", repo: str = ".", pr: str = "",
         return await watching()
     if action == "unwatch":
         return await unwatch(repo=repo, pr=pr or None)
+    if action == "ack":
+        return await ack(repo=repo, pr=pr or None)
     if action == "unwatch-all":
         return await unwatch(all=True)
     raise PrWatchError(f"unknown action {action!r}")
