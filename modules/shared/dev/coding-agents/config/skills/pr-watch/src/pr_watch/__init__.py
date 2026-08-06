@@ -307,7 +307,27 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     repo = str(Path(repo).resolve())
     if pr is None:
         raise PrWatchError("pass pr=<number>")
-    seen = {i["id"] for i in await _activity(repo, pr) if i.get("id")} if seed else set()
+    # The seen-set lives in the shared state file, not just in memory: this
+    # loop blocks for hours, so the parent agent's own ack() (after it posts a
+    # reply of its own) has no other way to reach it - a steering message would
+    # queue behind the very cell it needs to influence.
+    key = _key(repo, pr)
+    state = _load()
+    entry = state["watches"].setdefault(key, {"repo": repo, "pr": pr})
+    entry["quiet_seconds"] = quiet_seconds
+    if seed:
+        entry["seen"] = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")})
+    entry.setdefault("seen", [])
+    _save(state)
+
+    def _seen_now() -> set:
+        return set((_load()["watches"].get(key) or {}).get("seen", []))
+
+    def _mark(ids: set) -> None:
+        st = _load()
+        e = st["watches"].setdefault(key, {"repo": repo, "pr": pr, "seen": []})
+        e["seen"] = sorted(set(e.get("seen", [])) | ids)
+        _save(st)
     deadline = time.time() + max_hours * 3600.0
     sent = errors = 0
     pending: dict[str, dict] = {}
@@ -318,9 +338,12 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         except PrWatchError:
             errors += 1
             continue
+        seen = _seen_now()
         for i in items:
             if i.get("id") and i["id"] not in seen:
                 pending[i["id"]] = i
+        for gone in [k for k in pending if k in seen]:   # acked while pending
+            pending.pop(gone)
         if not pending:
             continue
         newest = max(i["at"] for i in pending.values())
@@ -339,7 +362,7 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         else:
             print(message)
         sent += 1
-        seen |= set(pending)
+        _mark(set(pending))
         pending.clear()
     return (f"pr-watch serve finished after {max_hours}h: "
             f"{sent} notification(s), {errors} poll error(s). Re-arm to keep watching.")
