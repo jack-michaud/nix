@@ -108,17 +108,21 @@ in {
     bootstrapKernel = mkBoolOpt false;
   };
 
+  # Everything here goes through `home-manager.users.<user>` rather than a
+  # bare `home.*`: nix-darwin has no system-level `home.packages` /
+  # `home.sessionPath`, and DARKFOREST's standalone-home-manager bridge folds
+  # this namespace back into its native `home.*`.
   config = mkIf cfg.enable {
-    # `npm install -g` puts the CLI in <prefix>/bin, which nothing else adds
-    # to PATH (the installer's own profile edit is deliberately neutralised).
-    home.sessionPath = [ "${prefix}/bin" ];
-
-    # The installed CLI is a `#!/usr/bin/env node` script, so it needs a node
-    # at *runtime*, not just at install time. Ship the same nodejs the
-    # installer runs against rather than depending on a distro package.
-    home.packages = [ pkgs.nodejs ];
-
     home-manager.users.${config.user.name} = { lib, ... }: {
+      # The installed CLI is a `#!/usr/bin/env node` script, so it needs a
+      # node at *runtime*, not just at install time. Ship the same nodejs the
+      # installer runs against rather than depending on a distro package.
+      home.packages = [ pkgs.nodejs ];
+
+      # `npm install -g` puts the CLI in <prefix>/bin, which nothing else adds
+      # to PATH (the installer's own profile edit is deliberately neutralised).
+      home.sessionPath = [ "${prefix}/bin" ];
+
       home.activation = {
         # `run` honours $DRY_RUN_CMD, so `home-manager build` / dry-activate
         # prints the script instead of installing anything.

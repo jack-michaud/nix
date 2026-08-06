@@ -78,6 +78,10 @@
     # Private Node/TS tool (flake input, builds its own buildNpmPackage
     # output); KRONOS gets it too since it reuses this config.
     dev.agent-harness.enable = true;
+    # The Prime Agent runtime itself, installed by the vendor installer at
+    # activation time (see the module for why it is not a nix package); the
+    # skills it loads come from dev.coding-agents above. KRONOS gets it too.
+    dev.prime-agent.enable = true;
     shells = {
       tmux.enable = true;
       zsh.enable = true;

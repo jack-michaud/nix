@@ -56,14 +56,24 @@ in
       default = [ ];
       description = "System packages; mapped to home.packages below.";
     };
-    # coding-agents defines `home-manager.users.<user>.home.activation`
-    # (there's no `home.activation` alias at the system level). Catch it here
-    # and fold it into the native HM `home.activation` below.
+    # coding-agents and prime-agent define their per-user config under
+    # `home-manager.users.<user>` (there's no `home.activation` alias at the
+    # system level, and nix-darwin has no system-level `home.packages` /
+    # `home.sessionPath`). Catch that namespace here and fold it into the
+    # native HM options below.
     home-manager.users = mkOption {
       type = types.attrsOf (types.submodule {
         options.home.activation = mkOption {
           type = types.attrs;
           default = { };
+        };
+        options.home.packages = mkOption {
+          type = types.listOf types.package;
+          default = [ ];
+        };
+        options.home.sessionPath = mkOption {
+          type = types.listOf types.str;
+          default = [ ];
         };
       });
       default = { };
@@ -110,10 +120,15 @@ in
     modules.dev.comment-trainer.enable = true;
 
     home.packages = config.environment.systemPackages
-      ++ [ config.modules.shells.herdr.package ];
+      ++ [ config.modules.shells.herdr.package ]
+      ++ concatLists (mapAttrsToList (_user: u: u.home.packages)
+        config.home-manager.users);
 
-    # Bridge: system modules add activation under home-manager.users.<user>;
-    # in standalone HM those must land in the top-level home.activation.
+    # Bridge: system modules add activation, packages, and PATH entries under
+    # home-manager.users.<user>; in standalone HM those must land in the
+    # top-level home.* options.
+    home.sessionPath = concatLists (mapAttrsToList (_user: u: u.home.sessionPath)
+      config.home-manager.users);
     home.activation = mkMerge (mapAttrsToList
       (_user: u: u.home.activation)
       config.home-manager.users);
