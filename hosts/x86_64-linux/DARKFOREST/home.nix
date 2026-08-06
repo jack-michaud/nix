@@ -26,6 +26,7 @@ in
     ../../../modules/shared/shells/herdr
     ../../../modules/shared/dev/coding-agents
     ../../../modules/shared/dev/agent-harness.nix
+    ../../../modules/shared/dev/prime-agent.nix
     ../../../modules/shared/dev/comment-trainer.nix
     ./phone-mic.nix
   ];
@@ -100,6 +101,10 @@ in
       enable = true;
       role = "personal";
     };
+    # The Prime Agent runtime itself, installed by the vendor installer at
+    # activation time (see the module for why it is not a nix package). The
+    # skills it loads come from modules.dev.coding-agents above.
+    modules.dev.prime-agent.enable = true;
     # Private tools from flake inputs (built from source), mirroring DAMOCLES.
     modules.dev.agent-harness.enable = true;
     modules.dev.comment-trainer.enable = true;
