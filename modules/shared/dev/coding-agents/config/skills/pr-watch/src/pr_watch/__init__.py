@@ -12,10 +12,12 @@ restart; the heartbeat lives in the session, so it stops when the session ends.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
 import re
 import shutil
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -43,6 +45,41 @@ class PrWatchError(RuntimeError):
 
 # ---------------------------------------------------------------- state ----
 
+def _owner(owner: Optional[str] = None) -> str:
+    """Who a watch belongs to: the AGENT SESSION that owns it.
+
+    Watchers in different sessions must keep independent seen-sets, or the first
+    one to mark an item seen silently swallows the other's notification. The
+    watcher CHILD inherits its parent's owner (watch_via_child passes it in), so
+    a parent's ack() still reaches its own blocked child.
+    """
+    if owner:
+        return owner
+    env = os.environ.get("PR_WATCH_OWNER") or os.environ.get(
+        "PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID")
+    if env:
+        return env
+    session_dir = os.environ.get("RLM_SESSION_DIR")
+    return Path(session_dir).name if session_dir else "default"
+
+
+@contextmanager
+def _locked():
+    """Hold an flock around a read-modify-write of the shared state file.
+
+    Several watchers on one machine write this file concurrently; without the
+    lock a read-modify-write loses the other's seen-set updates.
+    """
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock = STATE_PATH.with_suffix(".lock")
+    with open(lock, "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def _load() -> dict:
     if not STATE_PATH.exists():
         return {"watches": {}}
@@ -54,13 +91,15 @@ def _load() -> dict:
 
 def _save(state: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
+    # A per-process temp name: a shared one would let two writers interleave
+    # into the same file before either rename lands.
+    tmp = STATE_PATH.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(state, indent=2, default=str))
     tmp.replace(STATE_PATH)
 
 
-def _key(repo: str, pr: Any) -> str:
-    return f"{Path(repo).resolve()}#{pr}"
+def _key(repo: str, pr: Any, owner: Optional[str] = None) -> str:
+    return f"{Path(repo).resolve()}#{pr}@{_owner(owner)}"
 
 
 # ------------------------------------------------------------------ gh ----
@@ -161,13 +200,15 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
     if pr is None:
         raise PrWatchError("pass pr=<number>")
     items = await _activity(repo, pr) if seed else []
-    state = _load()
-    state["watches"][_key(repo, pr)] = {
-        "repo": repo, "pr": pr, "quiet_seconds": quiet_seconds,
-        "seen": [i["id"] for i in items if i.get("id")],
-        "added_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _save(state)
+    with _locked():
+        state = _load()
+        state["watches"][_key(repo, pr)] = {
+            "repo": repo, "pr": pr, "quiet_seconds": quiet_seconds,
+            "owner": _owner(),
+            "seen": [i["id"] for i in items if i.get("id")],
+            "added_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save(state)
     hb = await _ensure_heartbeat(interval) if heartbeat else None
     return {"watching": _key(repo, pr), "seeded": len(items),
             "quiet_seconds": quiet_seconds, "heartbeat": hb}
@@ -194,10 +235,13 @@ async def poll(mark_seen: bool = True) -> str:
     (default 180), so one burst of review comments produces one wake-up.
     """
     state = _load()
+    mine = _owner()
     now = datetime.now(timezone.utc).timestamp()
     ready_lines: list[str] = []
     holding: list[str] = []
-    for key, entry in state["watches"].items():
+    for key, entry in list(state["watches"].items()):
+        if entry.get("owner", mine) != mine:
+            continue   # another session's watcher reports to its own agent
         try:
             items = await _activity(entry["repo"], entry["pr"])
         except PrWatchError as exc:
@@ -239,17 +283,24 @@ async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False) -> s
     GitHub account as its human, so its OWN reply would otherwise read as new
     activity and wake it up to answer itself.
     """
+    mine = _owner()
     state = _load()
-    keys = list(state["watches"]) if all else [_key(str(Path(repo).resolve()), pr)]
-    acked = 0
+    # Only this session's own watches: acking another session's watcher would
+    # silence a notification its own agent never saw.
+    keys = [k for k, v in state["watches"].items() if v.get("owner", mine) == mine] \
+        if all else [_key(str(Path(repo).resolve()), pr)]
+    current: dict[str, list] = {}
     for key in keys:
         entry = state["watches"].get(key)
-        if entry is None:
-            continue
-        items = await _activity(entry["repo"], entry["pr"])
-        entry["seen"] = sorted({i["id"] for i in items if i.get("id")})
-        acked += 1
-    _save(state)
+        if entry is not None:
+            current[key] = sorted({i["id"] for i in await _activity(entry["repo"], entry["pr"])
+                                   if i.get("id")})
+    with _locked():
+        state = _load()
+        for key, ids in current.items():
+            state["watches"].setdefault(key, {})["seen"] = ids
+        _save(state)
+    acked = len(current)
     return f"pr-watch: acknowledged current activity on {acked} watch(es)."
 
 
@@ -295,7 +346,8 @@ async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False) 
 async def serve(repo: str = ".", pr: Optional[Any] = None,
                 quiet_seconds: float = DEFAULT_QUIET_SECONDS,
                 poll_seconds: float = 30.0, max_hours: float = 6.0,
-                notify: bool = True, seed: bool = True) -> str:
+                notify: bool = True, seed: bool = True,
+                owner: Optional[str] = None) -> str:
     """Block here, polling a PR, and message the PARENT agent when activity settles.
 
     Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
@@ -311,23 +363,29 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     # loop blocks for hours, so the parent agent's own ack() (after it posts a
     # reply of its own) has no other way to reach it - a steering message would
     # queue behind the very cell it needs to influence.
-    key = _key(repo, pr)
-    state = _load()
-    entry = state["watches"].setdefault(key, {"repo": repo, "pr": pr})
-    entry["quiet_seconds"] = quiet_seconds
-    if seed:
-        entry["seen"] = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")})
-    entry.setdefault("seen", [])
-    _save(state)
+    key = _key(repo, pr, owner)
+    seeded = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")}) if seed else None
+    with _locked():
+        state = _load()
+        entry = state["watches"].setdefault(key, {"repo": repo, "pr": pr,
+                                                  "owner": _owner(owner)})
+        entry["quiet_seconds"] = quiet_seconds
+        if seeded is not None:
+            entry["seen"] = seeded
+        entry.setdefault("seen", [])
+        _save(state)
 
     def _seen_now() -> set:
-        return set((_load()["watches"].get(key) or {}).get("seen", []))
+        with _locked():
+            return set((_load()["watches"].get(key) or {}).get("seen", []))
 
     def _mark(ids: set) -> None:
-        st = _load()
-        e = st["watches"].setdefault(key, {"repo": repo, "pr": pr, "seen": []})
-        e["seen"] = sorted(set(e.get("seen", [])) | ids)
-        _save(st)
+        with _locked():
+            st = _load()
+            e = st["watches"].setdefault(key, {"repo": repo, "pr": pr,
+                                              "owner": _owner(owner), "seen": []})
+            e["seen"] = sorted(set(e.get("seen", [])) | ids)
+            _save(st)
     deadline = time.time() + max_hours * 3600.0
     sent = errors = 0
     pending: dict[str, dict] = {}
@@ -372,7 +430,8 @@ CHILD_TASK = """You are a PR watcher. Make exactly ONE tool call and nothing els
 
     import pr_watch
     print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
-                               poll_seconds={poll}, max_hours={hours}))
+                               poll_seconds={poll}, max_hours={hours},
+                               owner={owner!r}))
 
 That call BLOCKS for up to {hours} hours by design - this is expected, not a
 hang. It polls the PR inside that single cell and messages your parent itself
@@ -392,10 +451,14 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
     """
     import rlm  # kernel-only
 
+    # The child inherits THIS session's owner id, so the seen-set it shares is
+    # the one this agent's ack() writes to - and a watcher in another session
+    # keeps its own.
     task = CHILD_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
-                             quiet=quiet_seconds, poll=poll_seconds, hours=max_hours)
+                             quiet=quiet_seconds, poll=poll_seconds,
+                             hours=max_hours, owner=_owner())
     handle = await rlm.run(task, name=name)
-    return {"child": getattr(handle, "name", name),
+    return {"child": getattr(handle, "name", name), "owner": _owner(),
             "rlm_child_id": getattr(handle, "rlm_child_id", None),
             "watching": f"{Path(repo).resolve()}#{pr}",
             "note": "The child messages you when activity settles; never poll it."}

@@ -62,6 +62,14 @@ review. Items reported once are marked seen and never repeat.
 - Watched: issue comments, review bodies, and comments on **unresolved** review
   threads (a resolved thread needs no answer). Resolution state only exists in
   the GraphQL API, so that half goes through `gh api graphql`.
+- **Several watchers on one machine are safe.** A watch is keyed
+  `<repo>#<pr>@<owner>`, where owner is the agent SESSION that owns it
+  (`PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID`, or `PR_WATCH_OWNER`).
+  Two sessions watching one PR keep independent seen-sets, so neither swallows
+  the other's notification; `poll()`/`ack()` only touch the current session's
+  watches. The watcher child inherits its PARENT's owner id - that is what lets
+  a parent's `ack()` reach its own blocked child while staying isolated from
+  other sessions. Writes take an `flock` and use per-pid temp files.
 - State is `~/.prime/agent/pr-watch/state.json` (override with `PR_WATCH_STATE`)
   and survives a kernel restart; the heartbeat is session-scoped, so it dies with
   the session - re-`watch()` in a new session to re-arm it.
