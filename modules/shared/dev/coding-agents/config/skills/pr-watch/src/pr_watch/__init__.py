@@ -285,6 +285,99 @@ async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False) 
     return f"pr-watch: no longer watching {key}"
 
 
+# ------------------------------------------------------- push (no polling
+# turns) ----
+# A heartbeat costs one model turn per interval even when nothing happened.
+# A child agent costs one turn TOTAL: it starts `serve()` in a single tool call
+# that blocks for hours, polls inside that call (zero tokens), and calls
+# agent_message.send() from inside the still-running cell when activity settles.
+
+async def serve(repo: str = ".", pr: Optional[Any] = None,
+                quiet_seconds: float = DEFAULT_QUIET_SECONDS,
+                poll_seconds: float = 30.0, max_hours: float = 6.0,
+                notify: bool = True, seed: bool = True) -> str:
+    """Block here, polling a PR, and message the PARENT agent when activity settles.
+
+    Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
+    this one tool call, so idle polling consumes no model tokens. Returns when
+    `max_hours` elapses so the caller can re-arm.
+    """
+    import time
+
+    repo = str(Path(repo).resolve())
+    if pr is None:
+        raise PrWatchError("pass pr=<number>")
+    seen = {i["id"] for i in await _activity(repo, pr) if i.get("id")} if seed else set()
+    deadline = time.time() + max_hours * 3600.0
+    sent = errors = 0
+    pending: dict[str, dict] = {}
+    while time.time() < deadline:
+        await asyncio.sleep(poll_seconds)
+        try:
+            items = await _activity(repo, pr)
+        except PrWatchError:
+            errors += 1
+            continue
+        for i in items:
+            if i.get("id") and i["id"] not in seen:
+                pending[i["id"]] = i
+        if not pending:
+            continue
+        newest = max(i["at"] for i in pending.values())
+        if time.time() - newest < quiet_seconds:
+            continue  # still arriving - hold the whole burst
+        lines = [f"pr-watch: {len(pending)} new item(s) on {repo}#{pr} "
+                 f"(quiet for {int(quiet_seconds)}s):"]
+        for i in sorted(pending.values(), key=lambda x: x["at"]):
+            where = f" [{i.get('path')}]" if i.get("path") else ""
+            lines.append(f"  - {i['kind']}{where} by {i.get('author')}: "
+                         f"{(i.get('body') or '').strip()}\n    {i.get('url')}")
+        message = "\n".join(lines)
+        if notify:
+            import agent_message  # kernel-only; delivered while this cell runs
+            await agent_message.send(message, receiver_role="parent")
+        else:
+            print(message)
+        sent += 1
+        seen |= set(pending)
+        pending.clear()
+    return (f"pr-watch serve finished after {max_hours}h: "
+            f"{sent} notification(s), {errors} poll error(s). Re-arm to keep watching.")
+
+
+CHILD_TASK = """You are a PR watcher. Make exactly ONE tool call and nothing else:
+
+    import pr_watch
+    print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
+                               poll_seconds={poll}, max_hours={hours}))
+
+That call BLOCKS for up to {hours} hours by design - this is expected, not a
+hang. It polls the PR inside that single cell and messages your parent itself
+whenever comment activity settles, so you must NOT poll it, print progress, or
+send any message of your own. When the call finally returns, call it again with
+the same arguments unless your parent told you to stop."""
+
+
+async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
+                          quiet_seconds: float = DEFAULT_QUIET_SECONDS,
+                          poll_seconds: float = 30.0, max_hours: float = 6.0,
+                          name: str = "pr-watcher") -> dict:
+    """Spawn a watcher sub-agent that pushes wake-ups instead of being polled.
+
+    Costs one model turn to start; idle polling afterwards is free. Use instead
+    of watch()'s heartbeat when the PR may sit quiet for a long time.
+    """
+    import rlm  # kernel-only
+
+    task = CHILD_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
+                             quiet=quiet_seconds, poll=poll_seconds, hours=max_hours)
+    handle = await rlm.run(task, name=name)
+    return {"child": getattr(handle, "name", name),
+            "rlm_child_id": getattr(handle, "rlm_child_id", None),
+            "watching": f"{Path(repo).resolve()}#{pr}",
+            "note": "The child messages you when activity settles; never poll it."}
+
+
 async def run(action: str = "poll", repo: str = ".", pr: str = "",
               quiet_seconds: float = DEFAULT_QUIET_SECONDS,
               interval: str = "3m", seed: bool = True) -> str:
