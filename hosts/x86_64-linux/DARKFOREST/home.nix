@@ -75,6 +75,10 @@ in
           type = types.listOf types.str;
           default = [ ];
         };
+        options.home.file = mkOption {
+          type = types.attrsOf types.attrs;
+          default = { };
+        };
       });
       default = { };
     };
@@ -131,6 +135,8 @@ in
       config.home-manager.users);
     home.activation = mkMerge (mapAttrsToList
       (_user: u: u.home.activation)
+      config.home-manager.users);
+    home.file = mkMerge (mapAttrsToList (_user: u: u.home.file)
       config.home-manager.users);
   };
 }

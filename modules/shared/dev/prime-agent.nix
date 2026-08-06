@@ -29,7 +29,12 @@ let
     # by store path. node/npm on PATH is also what keeps the installer's
     # interactive "Install Node.js and npm? [Y/n]" branch from ever being
     # reached — activation has no terminal to answer it.
-    export PATH=${makeBinPath [ pkgs.nodejs pkgs.curl pkgs.coreutils pkgs.gnutar pkgs.gzip pkgs.gnused pkgs.gnugrep pkgs.which ]}:$PATH
+    # gawk is NOT optional: the installer selects the release's checksum line
+    # with `awk -v file=... '$2 == file {...}'` before verifying the download,
+    # so without it the install dies at "awk: command not found". It only
+    # survived on Linux because the activation PATH happened to include
+    # /usr/bin; nix-darwin's does not, which is where it actually broke.
+    export PATH=${makeBinPath [ pkgs.bash pkgs.nodejs pkgs.curl pkgs.coreutils pkgs.gawk pkgs.gnutar pkgs.gzip pkgs.gnused pkgs.gnugrep pkgs.which ]}:$PATH
 
     version=${escapeShellArg cfg.version}
     prefix=${escapeShellArg prefix}
@@ -80,7 +85,10 @@ let
       exit 0
     fi
 
-    if ! sh "$tmp/install.sh"; then
+    # Explicit interpreter: `sh` is not on the pinned PATH either, and relying
+    # on the inherited one is the same trap as awk (it resolved to /usr/bin/sh
+    # on Linux and would not have on a stricter activation environment).
+    if ! ${pkgs.bash}/bin/sh "$tmp/install.sh"; then
       warn "installer failed; leaving the current install alone."
       exit 0
     fi
@@ -135,6 +143,19 @@ in {
       # `npm install -g` puts the CLI in <prefix>/bin, which nothing else adds
       # to PATH (the installer's own profile edit is deliberately neutralised).
       home.sessionPath = [ "${prefix}/bin" ];
+
+      # ...but `home.sessionPath` only ever writes `hm-session-vars.sh`, which
+      # a POSIX shell sources and fish CANNOT. Jack's login shell is fish
+      # (/usr/bin/fish, and `modules.shells.fish` is not enabled on DARKFOREST,
+      # so home-manager does not own that config either) - which is why the bin
+      # dir was missing from PATH after a switch even though the generation
+      # exported it correctly. fish auto-sources conf.d/*.fish regardless of who
+      # manages the rest of its config, so put it there too. `fish_add_path` is
+      # idempotent, so re-running or nesting shells cannot duplicate the entry.
+      home.file.".config/fish/conf.d/prime-agent.fish".text = ''
+        # Managed by modules.dev.prime-agent - do not edit.
+        fish_add_path --global --prepend ${prefix}/bin
+      '';
 
       home.activation = {
         # `run` honours $DRY_RUN_CMD, so `home-manager build` / dry-activate
