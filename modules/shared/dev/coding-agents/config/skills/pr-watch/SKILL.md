@@ -21,15 +21,21 @@ await pr_watch.unwatch(repo="/path/to/repo", pr=2)
 await pr_watch.unwatch(all=True)                   # also cancels the heartbeat
 ```
 
-## Two ways to be woken (prefer the child)
+## Three ways to be woken (prefer the child)
 
-| | `watch_via_child()` | `watch()` |
-|---|---|---|
-| Mechanism | a sub-agent blocking in `serve()` | an RLM heartbeat + `poll()` |
-| Token cost while quiet | **zero** - the loop runs inside ONE tool call | one model turn per interval, forever |
-| Cost to start | one turn | one turn |
-| Latency | `poll_seconds` (default 30s) after the quiet window | up to the heartbeat interval |
-| Lifetime | until `max_hours` elapses, then re-arm | until the session ends |
+Prefer `watch_via_child()` by default; use `watch_via_sibling()` only when
+you are already at the RLM max recursion depth; otherwise use `watch()`
+(heartbeat) when a PR may sit quiet long enough that you'd rather not hold
+a sub-agent open, or when other constraints apply.
+
+| | `watch_via_child()` | `watch_via_sibling()` | `watch()` |
+|---|---|---|---|
+| Mechanism | a sub-agent blocking in `serve()` | a sub-agent blocking in `serve()`, spawned by YOUR PARENT | an RLM heartbeat + `poll()` |
+| Token cost while quiet | **zero** - the loop runs inside ONE tool call | **zero**, same as `watch_via_child()` | one model turn per interval, forever |
+| Cost to start | one turn | one turn (yours) + your parent's next turn | one turn |
+| Latency | `poll_seconds` (default 30s) after the quiet window | same, plus however long until your parent acts on the request | up to the heartbeat interval |
+| Lifetime | until `max_hours` elapses, then re-arm | until `max_hours` elapses, then re-arm | until the session ends |
+| Requires | RLM depth headroom to spawn a child | nothing - works even at max RLM recursion depth | nothing |
 
 ```python
 await pr_watch.watch_via_child(repo="/path/to/repo", pr=2)   # push, free while idle
@@ -45,6 +51,41 @@ hours, polls `gh` inside that single cell, and calls `agent_message.send(...,
 receiver_role="parent")` from inside the still-running cell when a burst settles.
 Polling therefore costs no tokens at all: an idle watcher is a sleeping Python
 loop, not a recurring conversation. Never poll that child; it reports on its own.
+
+### `watch_via_sibling()` - use only at the RLM recursion depth cap
+
+`watch_via_child()` spawns a CHILD (depth+1) and relies on that child being
+able to message `receiver_role="parent"` straight back to the session that
+spawned it. That breaks down when the calling session is ALREADY at max RLM
+recursion depth: `rlm.run` has no depth left to spawn into, so
+`watch_via_child()` cannot be called at all - and calling `serve()` directly in
+the caller's own kernel just blocks the very session that needed to stay free
+(and its "message parent when settled" side effect fires to the CALLER's
+parent, not back to the caller, since the caller isn't that parent's child in
+this picture - it just invoked a blocking function directly). That is a real
+bug that has been hit live.
+
+**Use `watch_via_child()` normally; use `watch_via_sibling()` instead only
+when you are already at max RLM recursion depth and cannot spawn a child.**
+
+```python
+await pr_watch.watch_via_sibling(repo="/path/to/repo", pr=2)
+```
+
+There is no "spawn a sibling of myself" primitive exposed to a running
+session's own code - only to whatever orchestrated that session in the first
+place, which from inside the session is reachable only as "my parent". So
+`watch_via_sibling()` sends its OWN PARENT a message asking it to spawn a
+watcher child of ITS OWN: a child spawned by the parent lands at the *caller's*
+depth (a true sibling), not one below it. The spawned watcher then calls
+`pr_watch.serve(..., notify_role="sibling", notify_name=<the original caller>)`
+so it reports settled activity directly back to the original caller via
+`agent_message.send(..., receiver_role="sibling")` - never through the
+parent's own turn, so the parent does not end up making decisions that were
+the watcher's own job. This makes the spawn step slightly less immediate than
+`watch_via_child()` (it depends on the parent acting on the request on its
+next turn), but the calling session itself never blocks and is notified
+directly, which is the whole point.
 
 ## The debounce is the point
 

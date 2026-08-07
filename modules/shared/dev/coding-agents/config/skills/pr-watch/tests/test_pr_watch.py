@@ -136,5 +136,64 @@ class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
         self.assertNotEqual(id_a, id_b)
 
 
+class ServeNotifyTargetTest(unittest.TestCase):
+    """serve()'s notify_role/notify_name override is what watch_via_sibling()
+    relies on: a sibling-spawned watcher must message the ORIGINAL caller, not
+    its own parent (a different session - the common parent). This is the
+    testable half of that fix; the actual spawn-a-watcher-via-my-parent
+    request in watch_via_sibling() itself depends on a live RLM
+    parent/sibling relationship and the parent's own next turn, so it is not
+    unit-testable here - only exercised live.
+    """
+
+    async def _fake_gh_one_comment(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 9, "url": "https://github.com/o/r/pull/9", "title": "t",
+                "comments": [{"url": "c1", "author": {"login": "reviewer"},
+                             "body": "hi", "createdAt": "2024-01-01T00:00:00Z"}],
+                "reviews": [], "headRefOid": "deadbeef",
+            })
+        if args[:2] == ["repo", "view"]:
+            return json.dumps({"owner": {"login": "o"}, "name": "r"})
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def test_serve_notifies_the_given_role_and_name_not_parent(self):
+        import sys
+        import tempfile
+        from unittest.mock import MagicMock
+
+        sent = []
+
+        async def _fake_send(message, receiver_role=None, receiver_name=None):
+            sent.append({"message": message, "receiver_role": receiver_role,
+                        "receiver_name": receiver_name})
+            return {"ok": True}
+
+        fake_agent_message = MagicMock()
+        fake_agent_message.send = _fake_send
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh_one_comment)), \
+                 patch.object(pr_watch, "STATE_PATH", state_path), \
+                 patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+                # Seed nothing (seed=False) so the pre-existing comment is
+                # immediately "new", and quiet_seconds=0 so it is reported on
+                # the very first poll instead of waiting out a debounce window.
+                _run(pr_watch.serve(
+                    repo=".", pr=9, quiet_seconds=0, poll_seconds=0.01,
+                    max_hours=0.0005, seed=False,
+                    notify_role="sibling", notify_name="original-caller-session",
+                ))
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["receiver_role"], "sibling")
+        self.assertEqual(sent[0]["receiver_name"], "original-caller-session")
+
+
 if __name__ == "__main__":
     unittest.main()
