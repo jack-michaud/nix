@@ -73,6 +73,69 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
 - `watch()` polls until checks settle, printing each poll and any comment that appeared after
   the first poll. It returns `{checks, comments, polls, settled, new_activity}`.
 
+## Stacked PRs
+
+`ship()` and `open_pr()` take `base=`, so a stack works - but the mechanics are
+easy to get wrong. Layout: **one commit per PR, one bookmark per commit, one PR
+per bookmark.** PR 1 bases on the trunk branch; every later PR must pass
+`base=<bookmark below it>`. Without that, GitHub diffs the child against trunk
+and shows the parent's commits inside the child's diff, so the reviewer reads
+the same code twice.
+
+**The stack tip is home.** Every operation ends by returning to the tip and
+pushing everything. Leaving `@` parked mid-stack is how the next change silently
+gets authored in the wrong place.
+
+### Review feedback on an earlier PR in the stack
+
+```sh
+jj new -r <latest revision in the PR that got feedback>
+# ...do the work...
+jj describe
+jj rebase -r <revision which starts the next PR>:: -d @   # that rev + all descendants onto the fix
+jj new <PR stack tip>                                     # return to the tip
+jj git push -b branch1 -b branch2 -b branch3              # push EVERY bookmark, not just the one you touched
+```
+
+`<rev>::` selects that revision *and all its descendants*; that is what carries
+the rest of the stack forward onto the new commit. Push every bookmark, because
+every PR above the fix now has new content - only pushing the one you edited
+leaves the PRs above it pointing at abandoned commits. Do not hand-cherry-pick
+and do not move bookmarks manually; the rebase already did both.
+
+### When the rebase leaves conflicts
+
+Resolve bottom-up, one revision at a time:
+
+```sh
+jj new <earliest conflicting revision>
+# ...fix the conflict...
+jj squash
+```
+
+Repeat until the whole branch is clean, then `jj new <PR stack tip>` and push
+everything again. This works because jj records a conflict *in the commit*
+rather than blocking the operation, so you can rebase the whole stack first and
+resolve afterwards.
+
+### When the bottom PR merges
+
+GitHub retargets the child PR to the trunk branch once the merged branch is
+deleted. With a merge queue that can land a moment after approval, so re-check
+the base before assuming it broke.
+
+### Orchestration
+
+- **One agent owns a whole stack.** A stack needs shared history, so it cannot
+  be split across agents - two agents in one working copy is a known failure
+  mode. Independent work gets separate workspaces; a stack does not.
+- **Count a stack as one review unit when rate-limiting open PRs.** A WIP limit
+  on open PRs exists to protect review capacity, and a stack of tightly-related
+  PRs by one author reviews as one cohesive chain - often more easily than the
+  same changes reviewed apart, since the whole plan is visible at once. The real
+  cost of stacking is reviewer cognitive load, not rebase pain (jj makes
+  rebasing cheap), and that is what should drive any depth cap.
+
 ## Notes
 
 **Pass `head=` once the working copy has moved.** `open_pr` infers the branch
