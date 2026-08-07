@@ -24,6 +24,92 @@ class JjShipError(RuntimeError):
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
+# --------------------------------------------------------------------------
+# markdown hard-wrap detection
+# --------------------------------------------------------------------------
+#
+# GFM (what GitHub renders PR bodies as) treats a single "\n" inside a
+# paragraph as a hard line break (<br>), unlike strict CommonMark's soft
+# break. An LLM's habit of hard-wrapping prose at ~80-100 columns therefore
+# renders as a paragraph visibly chopped into short lines on github.com. This
+# bit real PRs (fayhealthinc/fay-ui#3732, #3743, #3745,
+# fayhealthinc/fay-service#7207) and had to be manually rewrapped after the
+# fact each time - catch it before `gh pr create` ever runs instead.
+
+_STRUCTURAL_LINE_RE = re.compile(r"^\s*([-*+]\s|\d+[.)]\s|#{1,6}\s|>|\|)")
+_SENTENCE_END_CHARS = ".:!?"
+_TRAILING_CLOSERS = "\"'`)]"
+
+
+def _ends_sentence(line: str) -> bool:
+    """True if `line` looks like the end of a sentence/clause, not mid-wrap.
+
+    Strips trailing closing quotes/parens/backticks first so both orderings
+    ("...done.\"" and "...done)." ) are recognised.
+    """
+    s = line.rstrip()
+    while s and s[-1] in _TRAILING_CLOSERS:
+        s = s[:-1]
+    return bool(s) and s[-1] in _SENTENCE_END_CHARS
+
+
+def find_hard_wrapped_lines(body: str) -> list[tuple[int, str, str]]:
+    """Flag every `\n` inside `body` that looks like an LLM hard-wrap rather
+    than real markdown structure.
+
+    Returns a list of `(line_number, line, next_line)` triples, 1-indexed by
+    `line_number` (the line the suspicious break follows). A break is flagged
+    when both lines are non-blank prose (not inside a fenced code block, not
+    a list item/header/table row/blockquote on either side) and `line` does
+    not end with sentence/clause-ending punctuation (`.`, `:`, `!`, `?`, or
+    one of those immediately followed by a closing quote/paren/backtick).
+
+    False positives are avoided by leaving fenced code blocks, list items,
+    headers, table rows, and blockquotes untouched - those legitimately use
+    single newlines as real structure.
+    """
+    lines = body.split("\n")
+    hits: list[tuple[int, str, str]] = []
+    in_fence = False
+    for i in range(len(lines) - 1):
+        line, nxt = lines[i], lines[i + 1]
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not line.strip() or not nxt.strip():
+            continue
+        if _STRUCTURAL_LINE_RE.match(line) or _STRUCTURAL_LINE_RE.match(nxt):
+            continue
+        if _ends_sentence(line):
+            continue
+        hits.append((i + 1, line, nxt))
+    return hits
+
+
+def normalize_markdown_body(body: str) -> str:
+    """Fix what `find_hard_wrapped_lines` flags: join each hard-wrapped line
+    pair into one line (a single space in place of the offending `\n`).
+
+    Legitimate structure (blank-line paragraph breaks, lists, headers, code
+    fences, tables, blockquotes) is left byte-for-byte untouched, since
+    `find_hard_wrapped_lines` never flags a break there.
+    """
+    lines = body.split("\n")
+    hit_lines = {h[0] - 1 for h in find_hard_wrapped_lines(body)}
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        while i in hit_lines:
+            line = line + " " + lines[i + 1].lstrip()
+            i += 1
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
 # gh honours a user's `color: always` config even when its stdout is a pipe,
 # which puts ANSI escapes inside --json output and breaks json.loads. Force
 # plain output for every child, and strip escapes defensively on the way back.
@@ -172,8 +258,36 @@ async def _default_branch(repo: str = ".") -> Optional[str]:
 
 async def open_pr(title: str, body: str = "", repo: str = ".",
                   head: Optional[str] = None, base: Optional[str] = None,
-                  draft: bool = False) -> dict:
-    """Open a PR for the pushed bookmark, or return the existing one (idempotent)."""
+                  draft: bool = False, skip_wrap_check: bool = False) -> dict:
+    """Open a PR for the pushed bookmark, or return the existing one (idempotent).
+
+    Before submitting, `body` is checked with `find_hard_wrapped_lines()` and
+    rejected with `JjShipError` if it finds any hard-wrapped prose (see that
+    function's docstring for why: GFM renders a single `\n` inside a
+    paragraph as a real line break, not a soft one, so hand-wrapped text
+    renders visibly broken on github.com). Call `normalize_markdown_body(body)`
+    and retry rather than working around this.
+
+    `skip_wrap_check=True` is an explicit opt-in escape hatch for a body that
+    legitimately needs unusual line breaks the heuristic cannot tell from a
+    hard-wrap; it is not a silent default and should be a deliberate,
+    reasoned choice at the call site, not a routine one.
+    """
+    if not skip_wrap_check:
+        wrapped = find_hard_wrapped_lines(body)
+        if wrapped:
+            offenders = "\n".join(
+                f"  line {n}: {line!r}\n         -> {nxt!r}"
+                for n, line, nxt in wrapped
+            )
+            raise JjShipError(
+                "PR body has hard-wrapped prose that GitHub will render as "
+                "literal line breaks (GFM treats a single '\\n' inside a "
+                "paragraph as <br>, not a soft break):\n"
+                f"{offenders}\n"
+                "Call jj_ship.normalize_markdown_body(body) and retry - or, "
+                "if this break is deliberate, pass skip_wrap_check=True."
+            )
     head = head or await current_bookmark(repo=repo)
     if not head:
         raise JjShipError("no bookmark to open a PR for - pass head= explicitly")
@@ -335,12 +449,19 @@ async def watch(pr: Optional[Any] = None, repo: str = ".", interval: float = 30,
 
 async def ship(message: str, bookmark: str, title: Optional[str] = None,
                body: str = "", repo: str = ".", base: Optional[str] = None,
-               remote: str = "origin", draft: bool = False) -> dict:
-    """commit -> push -> open PR, in one call. Returns each step's result."""
+               remote: str = "origin", draft: bool = False,
+               skip_wrap_check: bool = False) -> dict:
+    """commit -> push -> open PR, in one call. Returns each step's result.
+
+    Inherits `open_pr()`'s hard-wrap check on `body` (see its docstring) -
+    `skip_wrap_check` is threaded through for the same rare opt-in escape
+    hatch, not a routine default.
+    """
     c = await commit(message, repo=repo, bookmark=bookmark)
     p = await push(repo=repo, bookmark=bookmark, remote=remote)
     pr = await open_pr(title or message.splitlines()[0], body, repo=repo,
-                       head=bookmark, base=base, draft=draft)
+                       head=bookmark, base=base, draft=draft,
+                       skip_wrap_check=skip_wrap_check)
     return {"commit": c, "push": p, "pr": pr}
 
 

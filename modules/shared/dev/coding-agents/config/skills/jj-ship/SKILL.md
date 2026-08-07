@@ -21,6 +21,17 @@ await jj_ship.open_pr("Fix the widget", body=BODY, repo=REPO)
 await jj_ship.watch(repo=REPO, interval=20, max_polls=30)   # CI + new comments
 ```
 
+**Before opening a PR, run your body through `normalize_markdown_body()`** if you
+wrote it with a text-wrap habit (hard-wrapping prose at ~80-100 columns):
+
+```python
+body = jj_ship.normalize_markdown_body(body)
+await jj_ship.open_pr("Fix the widget", body=body, repo=REPO)
+```
+
+`open_pr()` (and `ship()`, which calls it) reject a hard-wrapped body outright
+with `JjShipError` - see "Model" below for why.
+
 One-shot equivalent of the first three:
 
 ```python
@@ -44,6 +55,17 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
   bookmark on `@`, else on `@-` (the normal shape right after `commit()`).
 - `open_pr()` is **idempotent**: an existing open PR for that head branch is returned rather
   than a `gh pr create` failure.
+- `open_pr()` **rejects hard-wrapped PR bodies** before calling `gh`. GFM (what
+  github.com renders) treats a single `\n` inside a paragraph as a hard line
+  break (`<br>`), not a soft one like strict CommonMark, so an LLM's habit of
+  wrapping prose at ~80-100 columns renders as a paragraph visibly chopped
+  into short lines. `find_hard_wrapped_lines(body)` detects this
+  markdown-structure-aware (code fences, lists, headers, tables, and
+  blockquotes are never flagged); `normalize_markdown_body(body)` fixes it by
+  joining each flagged break into one line. `open_pr()`/`ship()` raise
+  `JjShipError` naming the offending line pairs instead of auto-fixing and
+  submitting - call `normalize_markdown_body()` and retry. `skip_wrap_check=True`
+  is an explicit, rarely-needed opt-in past this check, not a default.
 - `checks()` state is `passing | failing | pending | none`; a repo with no configured checks
   reports `none`, not an error.
 - `comments()` returns issue comments, review bodies, and **unresolved review threads**
