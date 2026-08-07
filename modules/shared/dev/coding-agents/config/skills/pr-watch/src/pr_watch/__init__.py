@@ -1,9 +1,13 @@
-"""pr-watch: wake this agent when a watched PR gets comments, after a quiet window.
+"""pr-watch: wake this agent when a watched PR gets comments or CI fails, after a quiet window.
 
 `watch()` registers a PR and an RLM heartbeat; every heartbeat turn calls
-`poll()`, which reports only comment activity that has been QUIET for
-`quiet_seconds` (default 180). A burst of review comments therefore produces one
-wake-up after the reviewer stops typing, not one per comment.
+`poll()`, which reports only activity that has been QUIET for `quiet_seconds`
+(default 180). A burst of review comments therefore produces one wake-up after
+the reviewer stops typing, not one per comment. Failing CI check-runs are
+folded into the same activity stream (see `_check_runs`), because GitHub
+Actions failures do not post PR comments on their own - a watcher that only
+looked at comments would sit there reporting "quiet" while CI was red, which
+is exactly what happened live before this was added.
 
 State lives in ~/.prime/agent/pr-watch/state.json so it survives a kernel
 restart; the heartbeat lives in the session, so it stops when the session ends.
@@ -141,10 +145,57 @@ def _ts(value: Optional[str]) -> float:
         return 0.0
 
 
+# Conclusions GitHub considers a failed check-run. `neutral` and `skipped` are
+# deliberately excluded - they are not failures, just non-outcomes.
+_FAILING_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
+
+
+async def _check_run_failures(repo: str, owner: str, name: str,
+                              sha: Optional[str]) -> list[dict]:
+    """Failing check-runs for a commit SHA, as GitHub's raw check-run dicts.
+
+    Mirrors the check-run query in jj_ship.checks() (see
+    modules/shared/dev/coding-agents/config/skills/jj-ship/src/jj_ship/__init__.py)
+    but goes straight at `gh api .../check-runs` instead of `gh pr checks`,
+    because `gh pr checks` collapses each check-run's identity into a name -
+    there is no run/job id to key a "have I already reported this failure"
+    seen-set on. Paginated with `per_page=100`: the default page size silently
+    truncates on repos with many checks (confirmed live - fay-service had 43
+    check-runs on one commit and an unpaged call missed several, including the
+    one that had actually failed).
+    """
+    if not sha:
+        return []
+    failures: list[dict] = []
+    page = 1
+    while True:
+        raw = await _gh(["api", f"repos/{owner}/{name}/commits/{sha}/check-runs",
+                         "-F", "per_page=100", "-F", f"page={page}"],
+                        repo=repo, check=False)
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            # No CI configured, sha not found, auth hiccup, etc: degrade to
+            # "no failures" rather than raising - a PR with no CI is not an
+            # error condition for a comment-watching skill that now also
+            # looks at CI.
+            break
+        runs = data.get("check_runs", [])
+        if not runs:
+            break
+        failures.extend(r for r in runs if r.get("conclusion") in _FAILING_CONCLUSIONS)
+        if len(runs) < 100:
+            break
+        page += 1
+        if page > 10:  # safety cap: no repo legitimately has 1000+ check-runs
+            break
+    return failures
+
+
 async def _activity(repo: str, pr: Any) -> list[dict]:
-    """Every comment-ish event on a PR, newest last, as flat dicts with an id."""
+    """Every comment-ish or CI-failure event on a PR, newest last, as flat dicts with an id."""
     raw = await _gh(["pr", "view", str(pr), "--json",
-                     "number,url,title,comments,reviews"], repo=repo)
+                     "number,url,title,comments,reviews,headRefOid"], repo=repo)
     view = json.loads(raw)
     items: list[dict] = []
     for c in view.get("comments", []):
@@ -181,6 +232,22 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
                               "author": (c.get("author") or {}).get("login"),
                               "body": c.get("body"), "url": c.get("url"),
                               "at": _ts(c.get("createdAt"))})
+    # CI failures fold into the SAME items list, keyed by (run id, conclusion),
+    # so they ride the exact debounce/seen-tracking/ack machinery below that
+    # comments already use - not a second reporting channel. A check that
+    # fails, is fixed, and fails again for a different reason gets a new id
+    # (the conclusion changed) and is reported again; the same failure is not.
+    for run in await _check_run_failures(repo, ident["owner"]["login"], ident["name"],
+                                         view.get("headRefOid")):
+        conclusion = run.get("conclusion") or "unknown"
+        items.append({
+            "kind": f"check-run:{conclusion}",
+            "id": f"checkrun:{run.get('id')}:{conclusion}",
+            "author": None,
+            "body": f"{run.get('name')} - {conclusion}",
+            "url": run.get("html_url"),
+            "at": _ts(run.get("completed_at") or run.get("started_at")),
+        })
     items.sort(key=lambda i: i["at"])
     return items
 
