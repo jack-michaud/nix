@@ -1,15 +1,16 @@
 ---
 name: pr-watch
-description: Wake this agent when a watched GitHub PR receives comments, reviews, or unresolved review threads, after a quiet debounce window (default 3 minutes) so a burst of review comments produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Use after opening a PR that a human will review, or when asked to keep an eye on a PR and respond to feedback.
+description: Wake this agent when a watched GitHub PR receives comments, reviews, unresolved review threads, or a failing CI check-run, after a quiet debounce window (default 3 minutes) so a burst of activity produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Use after opening a PR that a human will review, or when asked to keep an eye on a PR and respond to feedback.
 compatibility: Requires an authenticated `gh` and runs inside the agent kernel (it spawns a sub-agent, or registers an RLM heartbeat).
 ---
 
 # pr-watch
 
 Opening a PR is not the end of the work - the review comes minutes or hours
-later. This watches the PR and wakes the session when comments land, so they get
-answered instead of forgotten - without paying model tokens for the silence in
-between.
+later, and CI can go red without anyone commenting about it (GitHub Actions
+failures do not post PR comments on their own). This watches the PR and wakes
+the session when comments land OR a check-run fails, so they get answered
+instead of forgotten - without paying model tokens for the silence in between.
 
 ```python
 await pr_watch.watch(repo="/path/to/repo", pr=2)   # arms the heartbeat too
@@ -59,9 +60,19 @@ review. Items reported once are marked seen and never repeat.
 - The heartbeat path runs every 3 minutes in `follow_up` mode, so it never
   interrupts work in progress. It is the fallback for when no sub-agent should
   be held open; `watch_via_child` is the default choice.
-- Watched: issue comments, review bodies, and comments on **unresolved** review
-  threads (a resolved thread needs no answer). Resolution state only exists in
-  the GraphQL API, so that half goes through `gh api graphql`.
+- Watched: issue comments, review bodies, comments on **unresolved** review
+  threads (a resolved thread needs no answer - resolution state only exists in
+  the GraphQL API, so that half goes through `gh api graphql`), and **failing
+  CI check-runs** on the PR's head commit (`gh api
+  repos/<owner>/<repo>/commits/<sha>/check-runs`, paginated at `per_page=100` -
+  the default page size silently truncates on repos with many checks, which is
+  how a real CI failure went unreported before this existed). A check-run
+  failure is keyed by `(run id, conclusion)`, so a check that fails, is fixed,
+  and fails again for a different reason is reported again, but the same
+  failure is not reported twice. A repo/PR with no CI configured, or a
+  head commit `gh api` cannot resolve, degrades to "no CI activity" rather
+  than erroring - see `_check_run_failures` in pr_watch's source, which
+  mirrors the check-run logic in the `jj-ship` skill's `checks()`.
 - **Several watchers on one machine are safe.** A watch is keyed
   `<repo>#<pr>@<owner>`, where owner is the agent SESSION that owns it
   (`PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID`, or `PR_WATCH_OWNER`).
