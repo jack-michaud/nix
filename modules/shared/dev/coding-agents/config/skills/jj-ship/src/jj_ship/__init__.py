@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+from pathlib import Path
 from typing import Any, Optional
 
 JJ_BIN = os.environ.get("JJ_BIN", "jj")
@@ -116,13 +117,104 @@ def normalize_markdown_body(body: str) -> str:
 _PLAIN_ENV = {"NO_COLOR": "1", "CLICOLOR": "0", "GH_FORCE_TTY": "", "GH_PAGER": "cat"}
 
 
+# ---------------------------------------------------------------------------
+# repo identity (GH_REPO)
+# ---------------------------------------------------------------------------
+# `gh` has to be told which repository it is about. Left to itself it infers
+# that from the git remote of its cwd, which fails outright in the directory
+# layout these agents actually work in: a `jj workspace add` directory has no
+# `.git` at all, so every gh call there dies with "failed to run git: fatal:
+# not a git repository". Confirmed live from a real workspace - `checks()`,
+# `find_pr()`, `comments()` and therefore `open_pr()`/`ship()`/`watch()` all
+# raised, while `current_bookmark()` worked because it shells out to `jj`.
+# `_default_branch()` was worse than a raise: it swallows failure and returns
+# None, silently disabling open_pr()'s "refusing to open a PR from the default
+# branch" guard.
+#
+# So resolve owner/name ourselves and hand it to gh as GH_REPO in the
+# subprocess env. GH_REPO rather than a `--repo` flag because `_gh` serves both
+# `gh pr ...` (accepts --repo) and `gh api graphql` (does NOT), so a flag would
+# have to know which subcommand it is running; the env var applies uniformly.
+#
+# This logic is deliberately DUPLICATED from the pr-watch skill's
+# `pr_watch._resolve_slug` (see ../../pr-watch/src/pr_watch/__init__.py) rather
+# than imported. jj-ship and pr-watch are separately packaged, independently
+# installed skills with their own pyproject.toml; importing one from the other
+# would make jj-ship unusable wherever pr-watch is not installed, to save ~30
+# lines. Keep the two in sync by hand - the ordering decisions below are load
+# bearing and are pinned by the same unit tests in both skills' test suites.
+
+# Resolution shells out, so cache it per repo path: watch() polls up to 40
+# times and the answer cannot change for a given path.
+_SLUG_CACHE: dict[str, str] = {}
+
+# Only GitHub remotes are usable by gh, and this must be strict: fay-service
+# carries a `bitbucket` remote and a local `no-mistakes` remote alongside
+# `origin`, so "take the first remote" would silently target Bitbucket.
+_GITHUB_URL_RE = re.compile(
+    r"^(?:git@github\.com:|ssh://git@github\.com/|https://(?:[^@/]+@)?github\.com/)"
+    r"(?P<owner>[^/]+)/(?P<name>.+?)(?:\.git)?$")
+
+
+def _parse_github_url(url: str) -> Optional[str]:
+    match = _GITHUB_URL_RE.match(url.strip())
+    return f"{match['owner']}/{match['name']}" if match else None
+
+
+async def _resolve_slug(repo: str = ".") -> str:
+    """`owner/name` for the GitHub repo that `repo` (a path) belongs to.
+
+    Works in a plain git checkout, in a colocated jj repo, and - the case this
+    exists for - in a `jj workspace add` directory with no `.git`. Raises
+    rather than returning None: this runs before the gh subprocess, so it
+    raises even for `check=False` callers, which is what stops a resolution
+    failure from being swallowed into an empty result.
+    """
+    path = str(Path(repo).resolve())
+    if path in _SLUG_CACHE:
+        return _SLUG_CACHE[path]
+    tried: list[str] = []
+    r = await _exec(["git", "-C", path, "remote", "get-url", "origin"],
+                    cwd=path, check=False)
+    if r["code"] == 0 and (slug := _parse_github_url(r["out"])):
+        _SLUG_CACHE[path] = slug
+        return slug
+    tried.append(f"git remote get-url origin -> {r['out'] or r['err']}")
+    # jj's own view of the remotes: this is what still works in a workspace.
+    r = await _exec([JJ_BIN, "--no-pager", "git", "remote", "list"],
+                    cwd=path, check=False)
+    if r["code"] == 0:
+        for line in r["out"].splitlines():
+            name, _, url = line.partition(" ")
+            # `origin` specifically - see _GITHUB_URL_RE on why "the first
+            # GitHub-looking remote" is not a safe rule here.
+            if name == "origin" and (slug := _parse_github_url(url)):
+                _SLUG_CACHE[path] = slug
+                return slug
+        tried.append(f"jj git remote list -> no GitHub `origin` in: {r['out']!r}")
+    else:
+        tried.append(f"jj git remote list -> {r['err']}")
+    # An ambient GH_REPO is honoured only as a LAST resort: it used to be the
+    # only reason a workspace ever worked, so ignoring it would regress - but
+    # preferring it would let one exported GH_REPO silently mistarget every
+    # other repo this process touches.
+    override = os.environ.get("GH_REPO", "").strip()
+    if override:
+        _SLUG_CACHE[path] = override
+        return override
+    raise JjShipError(
+        f"cannot determine the GitHub repo for {path!r}, so gh has nothing to "
+        f"talk to. Set GH_REPO=owner/name, or point repo= at a checkout with a "
+        f"GitHub `origin` remote. Tried: " + "; ".join(tried))
+
+
 async def _exec(argv: list[str], cwd: str = ".", check: bool = True,
-                timeout: float = 600) -> dict:
+                timeout: float = 600, env: Optional[dict] = None) -> dict:
     """Run a command, capture stdout/stderr, return {argv, code, out, err}."""
     if shutil.which(argv[0]) is None:
         raise JjShipError(f"binary not found on PATH: {argv[0]}")
     proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=cwd, env={**os.environ, **_PLAIN_ENV},
+        *argv, cwd=cwd, env={**os.environ, **_PLAIN_ENV, **(env or {})},
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
@@ -148,7 +240,10 @@ async def _jj(args: list[str], repo: str = ".", **kw) -> dict:
 
 
 async def _gh(args: list[str], repo: str = ".", **kw) -> dict:
-    return await _exec([GH_BIN, *args], cwd=repo, **kw)
+    # GH_REPO is what makes this work from a jj workspace: gh no longer has to
+    # infer the repo from a git remote in cwd, which there is not one of.
+    return await _exec([GH_BIN, *args], cwd=repo,
+                       env={"GH_REPO": await _resolve_slug(repo)}, **kw)
 
 
 async def _template(revset: str, template: str, repo: str = ".") -> str:
@@ -249,9 +344,20 @@ async def find_pr(repo: str = ".", head: Optional[str] = None) -> Optional[dict]
 
 
 async def _default_branch(repo: str = ".") -> Optional[str]:
-    """The repo's default branch per `gh`, or None when it cannot be determined."""
-    r = await _gh(["repo", "view", "--json", "defaultBranchRef",
-                   "-q", ".defaultBranchRef.name"], repo=repo, check=False)
+    """The repo's default branch per `gh`, or None when it cannot be determined.
+
+    `gh repo view` is the one subcommand here that does NOT honour GH_REPO - it
+    takes the repository as a positional argument and otherwise insists on
+    inferring it from cwd's git remote. So pass the resolved slug explicitly.
+    Verified by hand from a jj workspace: with GH_REPO set but no argument it
+    still fails with "failed to run git: fatal: not a git repository", and
+    because this function swallows failure into None it did so silently -
+    quietly disabling open_pr()'s "refusing to open a PR from the default
+    branch" guard rather than reporting anything.
+    """
+    r = await _gh(["repo", "view", await _resolve_slug(repo), "--json",
+                   "defaultBranchRef", "-q", ".defaultBranchRef.name"],
+                  repo=repo, check=False)
     name = (r["out"] or "").strip()
     return name or None
 
@@ -373,12 +479,14 @@ async def comments(pr: Optional[Any] = None, repo: str = ".",
                    "number,url,title,state,comments,reviews,headRefName,baseRefName"],
                   repo=repo)
     view = json.loads(r["out"])
-    owner_repo = await _gh(["repo", "view", "--json", "owner,name"], repo=repo)
-    ident = json.loads(owner_repo["out"])
+    # _THREAD_QUERY needs owner/name explicitly, and _resolve_slug already had
+    # to work them out to make gh usable at all - so reuse that rather than
+    # spend another `gh repo view` round trip on every call.
+    slug_owner, _, slug_name = (await _resolve_slug(repo)).partition("/")
     threads: list[dict] = []
     g = await _gh(["api", "graphql",
-                   "-F", f"owner={ident['owner']['login']}",
-                   "-F", f"name={ident['name']}",
+                   "-F", f"owner={slug_owner}",
+                   "-F", f"name={slug_name}",
                    "-F", f"number={view['number']}",
                    "-f", f"query={_THREAD_QUERY}"], repo=repo, check=False)
     if g["code"] == 0 and g["out"]:
