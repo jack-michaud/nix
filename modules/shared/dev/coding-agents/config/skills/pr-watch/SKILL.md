@@ -23,6 +23,11 @@ await pr_watch.unwatch(all=True)                   # also cancels the heartbeat
 
 ## Three ways to be woken (prefer the child)
 
+Prefer `watch_via_child()` by default; use `watch_via_sibling()` only when
+you are already at the RLM max recursion depth; otherwise use `watch()`
+(heartbeat) when a PR may sit quiet long enough that you'd rather not hold
+a sub-agent open, or when other constraints apply.
+
 | | `watch_via_child()` | `watch_via_sibling()` | `watch()` |
 |---|---|---|---|
 | Mechanism | a sub-agent blocking in `serve()` | a sub-agent blocking in `serve()`, spawned by YOUR PARENT | an RLM heartbeat + `poll()` |
