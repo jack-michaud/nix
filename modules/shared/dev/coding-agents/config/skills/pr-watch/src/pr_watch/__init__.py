@@ -146,8 +146,13 @@ def _ts(value: Optional[str]) -> float:
 
 
 # Conclusions GitHub considers a failed check-run. `neutral` and `skipped` are
-# deliberately excluded - they are not failures, just non-outcomes.
-_FAILING_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
+# deliberately excluded - they are not failures, just non-outcomes. `cancelled`
+# is excluded too: confirmed live on fayhealthinc/fay-ui#3732, where two
+# `cancelled` CodeQL runs were just superseded by a later push, not real
+# failures. The check-run API gives no reliable way to tell "cancelled because
+# a newer commit superseded it" apart from "cancelled because someone manually
+# killed it", so rather than guess, treat all cancellations as non-actionable.
+_FAILING_CONCLUSIONS = {"failure", "timed_out", "action_required"}
 
 
 async def _check_run_failures(repo: str, owner: str, name: str,

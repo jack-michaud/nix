@@ -44,12 +44,14 @@ class CheckRunPaginationTest(unittest.TestCase):
         self.page1 = {
             "check_runs": [_check_run(i, f"check-{i}", "success", 1) for i in range(100)]
         }
-        # Page 2: a handful more, including one real failure.
+        # Page 2: a handful more, including one real failure and one
+        # cancelled run (e.g. superseded by a later push - not a failure).
         self.page2 = {
             "check_runs": [
                 _check_run(101, "unit-tests", "success", 2),
                 _check_run(102, "validate_migrations", "failure", 2),
                 _check_run(103, "lint", "neutral", 2),
+                _check_run(104, "CodeQL Analyze", "cancelled", 2),
             ]
         }
         # Page 3: empty - pagination must stop here, not loop forever.
@@ -71,6 +73,10 @@ class CheckRunPaginationTest(unittest.TestCase):
         self.assertEqual(names, {"validate_migrations"})
         self.assertNotIn("unit-tests", names)  # passing runs are excluded
         self.assertNotIn("lint", names)  # neutral is not a failure
+        # cancelled is excluded too: often just a run superseded by a later
+        # push (confirmed live on fayhealthinc/fay-ui#3732's CodeQL runs), and
+        # the API gives no way to tell that apart from a real kill.
+        self.assertNotIn("CodeQL Analyze", names)
 
     def test_no_sha_returns_no_failures(self):
         with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)):
