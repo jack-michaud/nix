@@ -1,0 +1,207 @@
+"""Unit tests for jj_ship's markdown hard-wrap detection/normalization and its
+enforcement in open_pr()/ship() (added after real PRs - fayhealthinc/fay-ui
+#3732, #3743, #3745, fayhealthinc/fay-service#7207 - were opened with bodies
+GitHub rendered as visibly broken paragraphs, because GFM treats a single
+"\n" inside a paragraph as a hard line break, not a soft one).
+
+Runs with plain `python3 -m unittest` - no pytest dependency, no `gh`/`jj`
+binary required (the `_gh`/`_jj` calls are monkeypatched where needed).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import jj_ship  # noqa: E402
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+# Real (excerpted) hard-wrapped bodies from this session's bad PRs.
+BAD_3745_A = (
+    "The progress tab announcement modal was supposed to trigger when a "
+    "provider navigates\n"
+    "(client-side, SPA navigation) to a client-details screen, but it only\n"
+    "triggered on a hard page refresh."
+)
+BAD_3745_B = (
+    "`PromptQueueContext`'s prompt state machine was strictly forward-only\n"
+    "(`loading -> active -> released`, never backward). `Announcements`/"
+    "`useAnnouncements`\n"
+    "release the \"announcements\" queue slot whenever no announcement is "
+    "currently eligible\n"
+    "for the page (e.g. a page-gated announcement not eligible on the page "
+    "a provider\n"
+    "first lands on). Since `PromptQueueProvider`/`Announcements` are "
+    "mounted once near the\n"
+    "app root and never remount on navigation, once that slot hit "
+    "\"released...\""
+)
+BAD_7207_A = (
+    "Intercom identity tokens are hardcoded to a 1-hour lifetime, and QA "
+    "has no way to\n"
+    "exercise expired-token behavior (e.g. investigating an iOS token "
+    "refresh bug) without\n"
+    "waiting an hour. This adds a self-service Statsig lever so specific "
+    "patients can be\n"
+    "given a much shorter token lifetime."
+)
+BAD_7207_B = (
+    "This PR is backend-only, per the ticket's suggested phasing. "
+    "`fay-ui`'s\n"
+    "client-side refresh interval is a separate, deliberately deferred "
+    "piece of work (see\n"
+    "Tricky bits below)."
+)
+
+CLEAN_BODY = """**Fixes the widget so it renders correctly.**
+
+## Context
+
+The widget broke after the last refactor. Some background here that ends with a colon:
+
+- item one
+- item two
+- item three
+
+```python
+def foo():
+    return 1
+```
+
+A table:
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+> A blockquote
+> spanning several lines is real structure.
+
+## Evidence
+
+Ran the tests, they passed.
+"""
+
+
+class FindHardWrappedLinesTest(unittest.TestCase):
+    def test_flags_each_real_bad_excerpt(self):
+        for name, body, expected_min_hits in [
+            ("3745a", BAD_3745_A, 2),
+            ("3745b", BAD_3745_B, 4),
+            ("7207a", BAD_7207_A, 2),
+            ("7207b", BAD_7207_B, 1),
+        ]:
+            with self.subTest(name):
+                hits = jj_ship.find_hard_wrapped_lines(body)
+                self.assertGreaterEqual(len(hits), expected_min_hits, hits)
+
+    def test_clean_body_produces_zero_hits(self):
+        self.assertEqual(jj_ship.find_hard_wrapped_lines(CLEAN_BODY), [])
+
+    def test_code_fence_lines_are_never_flagged(self):
+        body = "prose\n\n```\nshort\nlines\nno punctuation\n```\n\nmore prose."
+        hits = jj_ship.find_hard_wrapped_lines(body)
+        self.assertEqual(hits, [])
+
+    def test_list_items_are_never_flagged(self):
+        body = "- first item\n- second item\n- third item"
+        self.assertEqual(jj_ship.find_hard_wrapped_lines(body), [])
+
+    def test_headers_and_table_rows_are_never_flagged(self):
+        body = "# Heading\nSome text.\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+        self.assertEqual(jj_ship.find_hard_wrapped_lines(body), [])
+
+    def test_blockquote_lines_are_never_flagged(self):
+        body = "> line one\n> line two"
+        self.assertEqual(jj_ship.find_hard_wrapped_lines(body), [])
+
+
+class NormalizeMarkdownBodyTest(unittest.TestCase):
+    def test_fixes_known_bad_bodies_to_zero_hits(self):
+        for body in (BAD_3745_A, BAD_3745_B, BAD_7207_A, BAD_7207_B):
+            fixed = jj_ship.normalize_markdown_body(body)
+            self.assertEqual(jj_ship.find_hard_wrapped_lines(fixed), [])
+
+    def test_leaves_clean_body_byte_for_byte_unchanged(self):
+        self.assertEqual(jj_ship.normalize_markdown_body(CLEAN_BODY), CLEAN_BODY)
+
+    def test_joins_with_a_single_space_not_concatenation(self):
+        fixed = jj_ship.normalize_markdown_body(BAD_7207_B)
+        self.assertNotIn("ui`'s\nclient", fixed)
+        self.assertIn("ui`'s client", fixed)
+
+
+class OpenPrWrapEnforcementTest(unittest.TestCase):
+    """open_pr() must reject a hard-wrapped body without ever calling gh."""
+
+    def test_raises_without_calling_gh(self):
+        gh_mock = AsyncMock()
+        with patch.object(jj_ship, "_gh", new=gh_mock), \
+             patch.object(jj_ship, "current_bookmark", new=AsyncMock(return_value="my-branch")), \
+             patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
+            with self.assertRaises(jj_ship.JjShipError) as ctx:
+                _run(jj_ship.open_pr("Title", body=BAD_7207_B, repo="."))
+        gh_mock.assert_not_called()
+        self.assertIn("normalize_markdown_body", str(ctx.exception))
+
+    def test_skip_wrap_check_bypasses_the_raise(self):
+        async def _fake_gh(args, repo, check=True):
+            if args[:2] == ["pr", "list"]:
+                return {"argv": args, "code": 0, "out": "[]", "err": ""}
+            if args[:2] == ["pr", "create"]:
+                return {"argv": args, "code": 0,
+                        "out": "https://github.com/o/r/pull/1", "err": ""}
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        with patch.object(jj_ship, "_gh", new=AsyncMock(side_effect=_fake_gh)), \
+             patch.object(jj_ship, "current_bookmark", new=AsyncMock(return_value="my-branch")), \
+             patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
+            result = _run(jj_ship.open_pr(
+                "Title", body=BAD_7207_B, repo=".", skip_wrap_check=True))
+        self.assertTrue(result["created"])
+
+    def test_clean_body_passes_straight_through(self):
+        async def _fake_gh(args, repo, check=True):
+            if args[:2] == ["pr", "list"]:
+                return {"argv": args, "code": 0, "out": "[]", "err": ""}
+            if args[:2] == ["pr", "create"]:
+                return {"argv": args, "code": 0,
+                        "out": "https://github.com/o/r/pull/2", "err": ""}
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        with patch.object(jj_ship, "_gh", new=AsyncMock(side_effect=_fake_gh)), \
+             patch.object(jj_ship, "current_bookmark", new=AsyncMock(return_value="my-branch")), \
+             patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
+            result = _run(jj_ship.open_pr("Title", body=CLEAN_BODY, repo="."))
+        self.assertTrue(result["created"])
+
+
+class ShipInheritsWrapEnforcementTest(unittest.TestCase):
+    """ship() calls open_pr() internally, so the same check must fire."""
+
+    def test_ship_raises_on_hard_wrapped_body_without_calling_gh(self):
+        gh_mock = AsyncMock()
+        jj_mock = AsyncMock(return_value={"argv": [], "code": 0, "out": "", "err": ""})
+        with patch.object(jj_ship, "_gh", new=gh_mock), \
+             patch.object(jj_ship, "_jj", new=jj_mock), \
+             patch.object(jj_ship, "status", new=AsyncMock(return_value={
+                 "change": "x", "description": "", "empty": False,
+                 "bookmarks": ["my-branch"], "parent_bookmarks": [], "status": "",
+             })), \
+             patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
+            with self.assertRaises(jj_ship.JjShipError):
+                _run(jj_ship.ship("msg", bookmark="my-branch", body=BAD_3745_A, repo="."))
+        gh_mock.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
