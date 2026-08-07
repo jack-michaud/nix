@@ -419,12 +419,21 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
                 quiet_seconds: float = DEFAULT_QUIET_SECONDS,
                 poll_seconds: float = 30.0, max_hours: float = 6.0,
                 notify: bool = True, seed: bool = True,
-                owner: Optional[str] = None) -> str:
-    """Block here, polling a PR, and message the PARENT agent when activity settles.
+                owner: Optional[str] = None,
+                notify_role: str = "parent",
+                notify_name: Optional[str] = None) -> str:
+    """Block here, polling a PR, and message an agent when activity settles.
 
     Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
     this one tool call, so idle polling consumes no model tokens. Returns when
     `max_hours` elapses so the caller can re-arm.
+
+    `notify_role`/`notify_name` default to messaging this watcher's own
+    PARENT, which is correct for a `watch_via_child()`-spawned watcher (the
+    caller IS its parent). A watcher spawned on someone else's behalf - see
+    `watch_via_sibling()`, where the watcher's parent and the original caller
+    are different sessions - must override these to reach the right session,
+    e.g. `notify_role="sibling", notify_name=<original caller>`.
     """
     import time
 
@@ -488,7 +497,8 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         message = "\n".join(lines)
         if notify:
             import agent_message  # kernel-only; delivered while this cell runs
-            await agent_message.send(message, receiver_role="parent")
+            await agent_message.send(message, receiver_role=notify_role,
+                                     receiver_name=notify_name)
         else:
             print(message)
         sent += 1
@@ -520,6 +530,10 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
 
     Costs one model turn to start; idle polling afterwards is free. Use instead
     of watch()'s heartbeat when the PR may sit quiet for a long time.
+
+    Requires RLM depth headroom: this spawns a CHILD of the calling session
+    (depth+1). If the caller is already at max RLM recursion depth, `rlm.run`
+    has nowhere to go and this cannot be used - see `watch_via_sibling()`.
     """
     import rlm  # kernel-only
 
@@ -534,6 +548,108 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
             "rlm_child_id": getattr(handle, "rlm_child_id", None),
             "watching": f"{Path(repo).resolve()}#{pr}",
             "note": "The child messages you when activity settles; never poll it."}
+
+
+# --------------------------------------------------- sibling watcher (depth
+# cap) ----
+# `rlm.run` (used by watch_via_child) is the only spawn primitive the kernel
+# exposes to a running agent's own code, and the host always admits its result
+# one RLM depth below the CALLER - there is no "spawn at my own depth"
+# primitive available from inside a session, only from whatever orchestrated
+# that session in the first place. So a session already at max RLM recursion
+# depth cannot call `rlm.run` at all: there is no depth left to spawn into,
+# and calling `serve()` directly in its own kernel just blocks the very
+# session that needed to stay free (the bug this module exists to avoid).
+#
+# The fix is to have this session's OWN PARENT do the spawning on its behalf.
+# A child spawned BY THE PARENT lands at the same depth as this session - a
+# real sibling, not a grandchild - which is exactly the depth-same
+# relationship the caller needs. This session cannot call `rlm.run` in the
+# parent's kernel directly, so it asks via
+# `agent_message.send(..., receiver_role="parent")` with a fully literal task
+# string (mirroring CHILD_TASK) naming this session as the watcher's
+# report-to target. `serve()`'s `notify_role`/`notify_name` let that spawned
+# watcher report with `receiver_role="sibling"` straight back to this session,
+# rather than to its own parent (which is a different session - the common
+# parent - not the original caller).
+#
+# This is honest about the mechanism but not fully synchronous the way
+# watch_via_child() is: the actual `rlm.run` call happens on the PARENT's next
+# turn, not inside this function, so it depends on the parent noticing and
+# acting on the steering message (exactly like any other steering message).
+# What this function guarantees is the part under this session's own control:
+# it returns immediately without blocking, and once the parent spawns the
+# watcher, that watcher reports directly back to THIS session by name - never
+# routing the notification through the parent's own turn, so the parent does
+# not end up making decisions that were this session's job.
+SIBLING_TASK = """You are a PR watcher, spawned on behalf of your PARENT's own
+sibling session {caller!r} (that session is at max RLM recursion depth and
+could not spawn this watcher itself). Make exactly ONE tool call and nothing
+else:
+
+    import pr_watch
+    print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
+                               poll_seconds={poll}, max_hours={hours},
+                               owner={owner!r}, notify_role="sibling",
+                               notify_name={caller!r}))
+
+That call BLOCKS for up to {hours} hours by design - this is expected, not a
+hang. It polls the PR inside that single cell and messages session {caller!r}
+directly (via receiver_role="sibling") whenever activity settles - NOT your
+own parent, which is a different session than the one that asked for this
+watch. You must NOT poll it, print progress, or send any message of your own.
+When the call finally returns, call it again with the same arguments unless
+{caller!r} told you to stop."""
+
+
+async def watch_via_sibling(repo: str = ".", pr: Optional[Any] = None,
+                            quiet_seconds: float = DEFAULT_QUIET_SECONDS,
+                            poll_seconds: float = 30.0, max_hours: float = 6.0,
+                            name: str = "pr-watcher") -> dict:
+    """Ask THIS session's parent to spawn a watcher that reports back here.
+
+    Use `watch_via_child()` normally; use `watch_via_sibling()` instead ONLY
+    when this session is already at max RLM recursion depth and cannot spawn
+    a child of its own (`rlm.run` would have no depth left to spawn into).
+
+    Unlike `watch_via_child()`, the actual spawn does not happen inside this
+    call: there is no "spawn at my own depth" primitive exposed to a running
+    session's own code, only to whatever orchestrated THIS session in the
+    first place - which, from here, is reachable only as "my parent". This
+    function sends the parent a literal, fully-specified task (mirroring
+    `CHILD_TASK`) asking it to spawn a watcher child of ITS OWN; that child
+    lands at the same depth as this session (a true sibling) rather than one
+    depth below it. The spawned sibling reports settled activity directly
+    back to this session via `receiver_role="sibling"`, never through the
+    parent's own turn - so the parent does not end up making decisions that
+    were this session's job, and this session stays completely free the
+    entire time.
+
+    Because the request only takes effect once the parent acts on it, this is
+    less immediate than `watch_via_child()` (which spawns synchronously). It
+    is the best available fallback given the depth cap: this session cannot
+    call `rlm.run` at all in that situation.
+    """
+    import agent_message  # kernel-only
+
+    agents = await agent_message.list_agents()
+    caller = agents["current"]["name"]
+    task = SIBLING_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
+                               quiet=quiet_seconds, poll=poll_seconds,
+                               hours=max_hours, owner=_owner(), caller=caller)
+    request = (
+        f"pr-watch: I am at max RLM recursion depth and cannot spawn my own "
+        f"watcher child. Please spawn a sub-agent named {name!r} with this "
+        f"exact task (a single literal `rlm.run` call is enough - do not "
+        f"paraphrase the task text):\n\n{task}"
+    )
+    receipt = await agent_message.send(request, receiver_role="parent")
+    return {"caller": caller, "owner": _owner(),
+            "watching": f"{Path(repo).resolve()}#{pr}",
+            "requested_via": "parent", "receipt": receipt,
+            "note": "Spawn happens on the parent's next turn, not synchronously; "
+                    "the sibling it creates reports back to THIS session "
+                    "directly, never through the parent."}
 
 
 async def stop_watchers(name: str = "pr-watcher", exact: bool = False) -> str:
