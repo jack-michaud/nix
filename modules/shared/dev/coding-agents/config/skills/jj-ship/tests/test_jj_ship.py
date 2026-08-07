@@ -298,5 +298,37 @@ class GhGetsTheRepoInItsEnvTest(unittest.TestCase):
         self.assertNotIn("--repo", seen["argv"])
 
 
+class BookmarkNameHasNoSyncMarkerTest(unittest.TestCase):
+    """jj renders a bookmark that differs from its remote as "name*", and that
+    string was fed straight to `jj git push --bookmark`, which rejected it with
+    "No such bookmark: name*". So the FIRST push to a new bookmark worked and the
+    second one - the re-push that updates an open PR - failed. Hit live."""
+
+    def test_status_asks_jj_for_bare_bookmark_names(self):
+        seen = []
+
+        async def _fake_jj(args, repo=".", **kw):
+            seen.append(args)
+            return {"argv": args, "code": 0, "out": "", "err": ""}
+
+        with patch.object(jj_ship, "_jj", new=AsyncMock(side_effect=_fake_jj)):
+            _run(jj_ship.status(repo="."))
+        templates = [a[a.index("-T") + 1] for a in seen if "-T" in a]
+        bookmark_templates = [t for t in templates if "bookmarks" in t]
+        self.assertTrue(bookmark_templates, "status() asked jj for no bookmarks")
+        for t in bookmark_templates:
+            # `.name()` is what strips the `*`; a bare `bookmarks.join(...)`
+            # reintroduces the bug.
+            self.assertIn("name()", t)
+
+    def test_current_bookmark_is_pushable_verbatim(self):
+        async def _fake_status(repo="."):
+            return {"change": "x", "description": "", "empty": False,
+                    "bookmarks": ["my-branch"], "parent_bookmarks": [], "status": ""}
+
+        with patch.object(jj_ship, "status", new=AsyncMock(side_effect=_fake_status)):
+            self.assertEqual(_run(jj_ship.current_bookmark(repo=".")), "my-branch")
+
+
 if __name__ == "__main__":
     unittest.main()

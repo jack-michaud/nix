@@ -261,8 +261,16 @@ async def status(repo: str = ".") -> dict:
     desc = await _template("@", 'description', repo=repo)
     change = await _template("@", 'change_id.short() ++ " " ++ commit_id.short()', repo=repo)
     empty = await _template("@", 'if(empty, "true", "false")', repo=repo)
-    bookmarks = await _template("@", 'bookmarks.join(",")', repo=repo)
-    parent_bookmarks = await _template("@-", 'bookmarks.join(",")', repo=repo)
+    # `.map(|b| b.name())` rather than a bare `bookmarks.join(",")`: jj's default
+    # formatting of a bookmark appends a `*` sync marker when the local bookmark
+    # differs from its remote, so the bare template yields "my-branch*" as soon
+    # as the bookmark has been pushed once and then moved. That string was fed
+    # straight into `jj git push --bookmark`, which failed with "No such
+    # bookmark: my-branch*" - so the SECOND push to an existing PR's bookmark
+    # broke while the first one worked.
+    names = 'bookmarks.map(|b| b.name()).join(",")'
+    bookmarks = await _template("@", names, repo=repo)
+    parent_bookmarks = await _template("@-", names, repo=repo)
     return {
         "change": change,
         "description": desc,
