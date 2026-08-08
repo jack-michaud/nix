@@ -203,5 +203,132 @@ class ShipInheritsWrapEnforcementTest(unittest.TestCase):
         gh_mock.assert_not_called()
 
 
+class RepoSlugResolutionTest(unittest.TestCase):
+    """`gh` infers its repo from cwd's git remote, and a `jj workspace add`
+    directory has no `.git` - so every _gh-backed entry point (checks, find_pr,
+    comments, _default_branch, and therefore open_pr/ship/watch) died with
+    "failed to run git: fatal: not a git repository". Confirmed live from a real
+    workspace. These cases pin the resolution order, which is duplicated in the
+    pr-watch skill's pr_watch._resolve_slug and must not drift from it."""
+
+    def setUp(self):
+        jj_ship._SLUG_CACHE.clear()
+
+    def tearDown(self):
+        jj_ship._SLUG_CACHE.clear()
+
+    def test_falls_back_to_jj_origin_when_there_is_no_git_dir(self):
+        async def _fake_exec(argv, cwd=".", check=True, timeout=600, env=None):
+            if argv[0] == "git":
+                return {"argv": argv, "code": 128, "out": "",
+                        "err": ("fatal: not a git repository (or any of the "
+                                "parent directories): .git")}
+            # Real `jj git remote list` output from fay-service: the GitHub
+            # `origin` is neither first nor the only remote.
+            return {"argv": argv, "code": 0, "err": "", "out": (
+                "bitbucket git@bitbucket.org:fayhealthinc/fay-service.git\n"
+                "no-mistakes /Users/j/.no-mistakes/repos/0b7165a5.git\n"
+                "origin git@github.com:fayhealthinc/fay-service.git")}
+
+        with patch.object(jj_ship, "_exec", new=AsyncMock(side_effect=_fake_exec)):
+            jj_ship.os.environ.pop("GH_REPO", None)
+            slug = _run(jj_ship._resolve_slug("."))
+        # NOT the bitbucket remote, which is what "take the first line" gives.
+        self.assertEqual(slug, "fayhealthinc/fay-service")
+
+    def test_resolution_is_cached_per_path(self):
+        calls = []
+
+        async def _fake_exec(argv, cwd=".", check=True, timeout=600, env=None):
+            calls.append(argv[0])
+            return {"argv": argv, "code": 0, "out": "https://github.com/o/r.git",
+                    "err": ""}
+
+        with patch.object(jj_ship, "_exec", new=AsyncMock(side_effect=_fake_exec)):
+            path = str(Path(".").resolve())
+            self.assertEqual(_run(jj_ship._resolve_slug(path)), "o/r")
+            self.assertEqual(_run(jj_ship._resolve_slug(path)), "o/r")
+        # watch() polls up to 40 times; resolution must not reshell each poll.
+        self.assertEqual(len(calls), 1)
+
+    def test_unresolvable_repo_fails_loudly(self):
+        async def _fake_exec(argv, cwd=".", check=True, timeout=600, env=None):
+            return {"argv": argv, "code": 128, "out": "",
+                    "err": "not a repo of any kind"}
+
+        with patch.object(jj_ship, "_exec", new=AsyncMock(side_effect=_fake_exec)):
+            jj_ship.os.environ.pop("GH_REPO", None)
+            with self.assertRaises(jj_ship.JjShipError) as ctx:
+                _run(jj_ship._resolve_slug("."))
+        self.assertIn("cannot determine the GitHub repo", str(ctx.exception))
+
+    def test_non_github_origin_is_rejected(self):
+        self.assertIsNone(
+            jj_ship._parse_github_url("git@bitbucket.org:fayhealthinc/fay-service.git"))
+        self.assertEqual(jj_ship._parse_github_url("git@github.com:o/r.git"), "o/r")
+        self.assertEqual(jj_ship._parse_github_url("https://github.com/o/r"), "o/r")
+        self.assertEqual(jj_ship._parse_github_url("ssh://git@github.com/o/r.git"), "o/r")
+
+
+class GhGetsTheRepoInItsEnvTest(unittest.TestCase):
+    """The actual fix: _gh must pass GH_REPO, and must do so for `gh api
+    graphql` too - which is why this is an env var and not a `--repo` flag
+    (graphql rejects --repo, so a blanket flag would break comments())."""
+
+    def setUp(self):
+        jj_ship._SLUG_CACHE.clear()
+
+    def tearDown(self):
+        jj_ship._SLUG_CACHE.clear()
+
+    def test_gh_is_given_gh_repo_in_its_env(self):
+        seen = {}
+
+        async def _fake_exec(argv, cwd=".", check=True, timeout=600, env=None):
+            seen["argv"] = argv
+            seen["env"] = env
+            return {"argv": argv, "code": 0, "out": "", "err": ""}
+
+        with patch.object(jj_ship, "_exec", new=AsyncMock(side_effect=_fake_exec)), \
+                patch.object(jj_ship, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            _run(jj_ship._gh(["api", "graphql", "-f", "query=x"], repo="."))
+        self.assertEqual(seen["env"], {"GH_REPO": "o/r"})
+        # No --repo flag was added: `gh api graphql` would reject it.
+        self.assertNotIn("--repo", seen["argv"])
+
+
+class BookmarkNameHasNoSyncMarkerTest(unittest.TestCase):
+    """jj renders a bookmark that differs from its remote as "name*", and that
+    string was fed straight to `jj git push --bookmark`, which rejected it with
+    "No such bookmark: name*". So the FIRST push to a new bookmark worked and the
+    second one - the re-push that updates an open PR - failed. Hit live."""
+
+    def test_status_asks_jj_for_bare_bookmark_names(self):
+        seen = []
+
+        async def _fake_jj(args, repo=".", **kw):
+            seen.append(args)
+            return {"argv": args, "code": 0, "out": "", "err": ""}
+
+        with patch.object(jj_ship, "_jj", new=AsyncMock(side_effect=_fake_jj)):
+            _run(jj_ship.status(repo="."))
+        templates = [a[a.index("-T") + 1] for a in seen if "-T" in a]
+        bookmark_templates = [t for t in templates if "bookmarks" in t]
+        self.assertTrue(bookmark_templates, "status() asked jj for no bookmarks")
+        for t in bookmark_templates:
+            # `.name()` is what strips the `*`; a bare `bookmarks.join(...)`
+            # reintroduces the bug.
+            self.assertIn("name()", t)
+
+    def test_current_bookmark_is_pushable_verbatim(self):
+        async def _fake_status(repo="."):
+            return {"change": "x", "description": "", "empty": False,
+                    "bookmarks": ["my-branch"], "parent_bookmarks": [], "status": ""}
+
+        with patch.object(jj_ship, "status", new=AsyncMock(side_effect=_fake_status)):
+            self.assertEqual(_run(jj_ship.current_bookmark(repo=".")), "my-branch")
+
+
 if __name__ == "__main__":
     unittest.main()

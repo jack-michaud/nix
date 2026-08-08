@@ -106,13 +106,107 @@ def _key(repo: str, pr: Any, owner: Optional[str] = None) -> str:
     return f"{Path(repo).resolve()}#{pr}@{_owner(owner)}"
 
 
+# --------------------------------------------------- repo identity (GH_REPO)
+# ----
+# Every gh call has to be told which repository it is about. Left to itself, gh
+# infers that from the git remote of its cwd - which fails outright in the
+# directory layout these agents actually work in: a `jj workspace add`
+# directory has no `.git` at all, so gh dies with "failed to run git: fatal:
+# not a git repository". That failure used to surface as `serve()` raising the
+# instant it armed, i.e. a watcher that reported as armed while never polling
+# once. Four real watchers were lost that way before this was fixed.
+#
+# So resolve the owner/name ourselves and hand it to gh as GH_REPO in the
+# subprocess env. GH_REPO rather than a `--repo` flag because `_gh` serves both
+# `gh pr ...` (takes --repo) and `gh api graphql` (does NOT take --repo), so a
+# per-subcommand flag would have to know which is which; the env var applies
+# uniformly and gh honours it for every subcommand.
+
+# Resolution shells out to jj/git, so cache it per repo path: serve() polls
+# every 30s for up to 6 hours and the answer cannot change for a given path.
+_SLUG_CACHE: dict[str, str] = {}
+
+# Only GitHub remotes are usable by gh, and this must be strict about it:
+# fay-service carries a `bitbucket` remote and a local `no-mistakes` remote
+# alongside `origin`, so "take the first remote" would silently point the
+# watcher at Bitbucket.
+_GITHUB_URL_RE = re.compile(
+    r"^(?:git@github\.com:|ssh://git@github\.com/|https://(?:[^@/]+@)?github\.com/)"
+    r"(?P<owner>[^/]+)/(?P<name>.+?)(?:\.git)?$")
+
+
+async def _run(binary: str, args: list[str], cwd: str) -> tuple[int, str, str]:
+    """Run a binary, returning (rc, stdout, stderr) with colour stripped."""
+    if shutil.which(binary) is None:
+        return 127, "", f"binary not found on PATH: {binary}"
+    proc = await asyncio.create_subprocess_exec(
+        binary, *args, cwd=cwd, env={**os.environ, **_PLAIN_ENV},
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await proc.communicate()
+    return (proc.returncode,
+            _ANSI_RE.sub("", out.decode("utf-8", "replace")).strip(),
+            _ANSI_RE.sub("", err.decode("utf-8", "replace")).strip())
+
+
+def _parse_github_url(url: str) -> Optional[str]:
+    match = _GITHUB_URL_RE.match(url.strip())
+    return f"{match['owner']}/{match['name']}" if match else None
+
+
+async def _resolve_slug(repo: str) -> str:
+    """`owner/name` for the GitHub repo that `repo` (a path) belongs to.
+
+    Works in a plain git checkout, in a colocated jj repo, and - the case this
+    exists for - in a `jj workspace add` directory that has no `.git`. Raises
+    loudly rather than returning None: a watcher that cannot name its repo must
+    fail at arming time, not poll silently forever against nothing.
+    """
+    path = str(Path(repo).resolve())
+    if path in _SLUG_CACHE:
+        return _SLUG_CACHE[path]
+    tried: list[str] = []
+    rc, out, err = await _run("git", ["-C", path, "remote", "get-url", "origin"], cwd=path)
+    if rc == 0 and (slug := _parse_github_url(out)):
+        _SLUG_CACHE[path] = slug
+        return slug
+    tried.append(f"git remote get-url origin -> {out or err or f'rc={rc}'}")
+    # jj's own view of the remotes: this is what still works inside a workspace.
+    rc, out, err = await _run("jj", ["git", "remote", "list"], cwd=path)
+    if rc == 0:
+        for line in out.splitlines():
+            name, _, url = line.partition(" ")
+            # `origin` specifically - see _GITHUB_URL_RE's comment on why
+            # scanning for "the first GitHub-looking remote" is not enough here.
+            if name == "origin" and (slug := _parse_github_url(url)):
+                _SLUG_CACHE[path] = slug
+                return slug
+        tried.append(f"jj git remote list -> no GitHub `origin` in: {out!r}")
+    else:
+        tried.append(f"jj git remote list -> {err or f'rc={rc}'}")
+    # An ambient GH_REPO is honoured only as a LAST resort, not first: it used
+    # to be the only reason a workspace ever worked, so dropping it would be a
+    # regression - but preferring it would make one exported GH_REPO silently
+    # mistarget every other repo this process watches.
+    override = os.environ.get("GH_REPO", "").strip()
+    if override:
+        _SLUG_CACHE[path] = override
+        return override
+    raise PrWatchError(
+        f"cannot determine the GitHub repo for {path!r}, so gh has nothing to "
+        f"talk to. Set GH_REPO=owner/name, or point repo= at a checkout with a "
+        f"GitHub `origin` remote. Tried: " + "; ".join(tried))
+
+
 # ------------------------------------------------------------------ gh ----
 
 async def _gh(args: list[str], repo: str, check: bool = True) -> str:
     if shutil.which(GH_BIN) is None:
         raise PrWatchError(f"binary not found on PATH: {GH_BIN}")
+    # GH_REPO is what makes this work from a jj workspace: gh no longer has to
+    # infer the repo from a git remote in cwd, which there is not one of.
+    env = {**os.environ, **_PLAIN_ENV, "GH_REPO": await _resolve_slug(repo)}
     proc = await asyncio.create_subprocess_exec(
-        GH_BIN, *args, cwd=repo, env={**os.environ, **_PLAIN_ENV},
+        GH_BIN, *args, cwd=repo, env=env,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     out, err = await proc.communicate()
     out_s = _ANSI_RE.sub("", out.decode("utf-8", "replace")).strip()
@@ -215,10 +309,13 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
                       "author": (rv.get("author") or {}).get("login"),
                       "body": rv.get("body"), "url": rv.get("url"),
                       "at": _ts(rv.get("submittedAt"))})
-    ident = json.loads(await _gh(["repo", "view", "--json", "owner,name"], repo=repo))
+    # _THREAD_QUERY and the check-run API both need owner/name explicitly, and
+    # _resolve_slug already had to work them out to make gh usable at all -
+    # so reuse that instead of a second `gh repo view` round trip per poll.
+    slug_owner, _, slug_name = (await _resolve_slug(repo)).partition("/")
     graph = await _gh(["api", "graphql",
-                       "-F", f"owner={ident['owner']['login']}",
-                       "-F", f"name={ident['name']}",
+                       "-F", f"owner={slug_owner}",
+                       "-F", f"name={slug_name}",
                        "-F", f"number={view['number']}",
                        "-f", f"query={_THREAD_QUERY}"], repo=repo, check=False)
     if graph:
@@ -242,7 +339,7 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
     # comments already use - not a second reporting channel. A check that
     # fails, is fixed, and fails again for a different reason gets a new id
     # (the conclusion changed) and is reported again; the same failure is not.
-    for run in await _check_run_failures(repo, ident["owner"]["login"], ident["name"],
+    for run in await _check_run_failures(repo, slug_owner, slug_name,
                                          view.get("headRefOid")):
         conclusion = run.get("conclusion") or "unknown"
         items.append({
@@ -271,6 +368,10 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
     repo = str(Path(repo).resolve())
     if pr is None:
         raise PrWatchError("pass pr=<number>")
+    # Resolve up front, even when seed=False skips the first _activity() call:
+    # an unresolvable repo must blow up HERE, at arming time, while someone is
+    # looking at the result - not later inside a poll loop that swallows errors.
+    await _resolve_slug(repo)
     items = await _activity(repo, pr) if seed else []
     with _locked():
         state = _load()
@@ -444,6 +545,10 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     # loop blocks for hours, so the parent agent's own ack() (after it posts a
     # reply of its own) has no other way to reach it - a steering message would
     # queue behind the very cell it needs to influence.
+    # Same reason as watch(): fail loudly before entering a loop whose
+    # per-poll error handling is (deliberately) silent, so a watcher can never
+    # again report as armed while being incapable of polling at all.
+    await _resolve_slug(repo)
     key = _key(repo, pr, owner)
     seeded = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")}) if seed else None
     with _locked():

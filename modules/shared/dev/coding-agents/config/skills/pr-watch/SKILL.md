@@ -127,6 +127,15 @@ review. Items reported once are marked seen and never repeat.
   the session - re-`watch()` in a new session to re-arm it.
 - `watch(seed=False)` hands you the PR's existing backlog on the first poll;
   the default seeds everything already there as seen.
+- **`repo=` may be a `jj workspace add` directory.** Such a directory has no
+  `.git`, so `gh` cannot infer the repo from it; pr-watch resolves
+  `owner/name` itself (git `origin`, else `jj git remote list`'s `origin`,
+  GitHub-only) and passes it as `GH_REPO`. Resolution is cached per path and
+  raises at arming time if it fails - it used to fail silently, leaving a
+  watcher that reported as armed while never polling once.
+- Watching is **read-only `gh` polling** - it never touches the working copy,
+  so aiming a watcher at a colocated checkout (or any other workspace) while
+  you work elsewhere is safe and does not break workspace isolation.
 
 Pair with the `jj-ship` skill: `jj_ship.open_pr(...)` then `pr_watch.watch(...)`,
 and answer a comment with a `gh pr comment` reply or a real fix pushed by

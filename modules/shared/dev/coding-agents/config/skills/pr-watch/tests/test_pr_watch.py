@@ -102,8 +102,6 @@ class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
                 "number": 7, "url": "https://github.com/o/r/pull/7", "title": "t",
                 "comments": [], "reviews": [], "headRefOid": "deadbeef",
             })
-        if args[:2] == ["repo", "view"]:
-            return json.dumps({"owner": {"login": "o"}, "name": "r"})
         if args[0] == "api" and args[1] == "graphql":
             return ""  # no review threads
         if args[0] == "api" and "check-runs" in args[1]:
@@ -119,7 +117,9 @@ class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
         raise AssertionError(f"unexpected gh call: {args}")
 
     def test_failing_check_run_appears_as_an_activity_item(self):
-        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
             items = _run(pr_watch._activity(".", 7))
         kinds = [i["kind"] for i in items]
         self.assertIn("check-run:failure", kinds)
@@ -134,6 +134,73 @@ class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
         id_a = "checkrun:1:failure"
         id_b = "checkrun:1:cancelled"
         self.assertNotEqual(id_a, id_b)
+
+
+class RepoSlugResolutionTest(unittest.TestCase):
+    """The jj-workspace bug: `gh` infers its repo from cwd's git remote, and a
+    `jj workspace add` directory has no `.git`, so every gh call died with
+    "failed to run git: fatal: not a git repository". serve() raised the instant
+    it armed and never polled - and since a fresh PR is quiet, nothing revealed
+    it. Four live watchers were lost that way."""
+
+    def setUp(self):
+        pr_watch._SLUG_CACHE.clear()
+
+    def tearDown(self):
+        pr_watch._SLUG_CACHE.clear()
+
+    def test_falls_back_to_jj_origin_when_there_is_no_git_dir(self):
+        async def _fake_run(binary, args, cwd):
+            if binary == "git":
+                return 128, "", ("fatal: not a git repository (or any of the "
+                                 "parent directories): .git")
+            # Real `jj git remote list` output from fay-service: the GitHub
+            # `origin` is neither first nor the only remote.
+            return 0, ("bitbucket git@bitbucket.org:fayhealthinc/fay-service.git\n"
+                       "no-mistakes /Users/j/.no-mistakes/repos/0b7165a5.git\n"
+                       "origin git@github.com:fayhealthinc/fay-service.git"), ""
+
+        with patch.object(pr_watch, "_run", new=AsyncMock(side_effect=_fake_run)), \
+                patch.dict(pr_watch.os.environ, {}, clear=False):
+            pr_watch.os.environ.pop("GH_REPO", None)
+            slug = _run(pr_watch._resolve_slug("."))
+        # NOT the bitbucket remote, which is what "take the first line" gives.
+        self.assertEqual(slug, "fayhealthinc/fay-service")
+
+    def test_resolution_is_cached_per_path(self):
+        calls = []
+
+        async def _fake_run(binary, args, cwd):
+            calls.append(binary)
+            return 0, "https://github.com/o/r.git", ""
+
+        with patch.object(pr_watch, "_run", new=AsyncMock(side_effect=_fake_run)):
+            path = str(Path(".").resolve())
+            self.assertEqual(_run(pr_watch._resolve_slug(path)), "o/r")
+            self.assertEqual(_run(pr_watch._resolve_slug(path)), "o/r")
+        # serve() polls every 30s for up to 6h; resolution must not reshell.
+        self.assertEqual(len(calls), 1)
+
+    def test_unresolvable_repo_fails_loudly(self):
+        async def _fake_run(binary, args, cwd):
+            return 128, "", "not a repo of any kind"
+
+        with patch.object(pr_watch, "_run", new=AsyncMock(side_effect=_fake_run)):
+            pr_watch.os.environ.pop("GH_REPO", None)
+            with self.assertRaises(pr_watch.PrWatchError) as ctx:
+                _run(pr_watch._resolve_slug("."))
+        # The whole point: a watcher must never look armed while being dead.
+        self.assertIn("cannot determine the GitHub repo", str(ctx.exception))
+
+    def test_non_github_origin_is_rejected(self):
+        self.assertIsNone(
+            pr_watch._parse_github_url("git@bitbucket.org:fayhealthinc/fay-service.git"))
+        self.assertEqual(
+            pr_watch._parse_github_url("git@github.com:o/r.git"), "o/r")
+        self.assertEqual(
+            pr_watch._parse_github_url("https://github.com/o/r"), "o/r")
+        self.assertEqual(
+            pr_watch._parse_github_url("ssh://git@github.com/o/r.git"), "o/r")
 
 
 class ServeNotifyTargetTest(unittest.TestCase):
