@@ -104,7 +104,7 @@ in {
     enable = mkBoolOpt false;
     # Bumping the agent is a one-line change here. The installer verifies the
     # release it downloads, so this is the only knob that decides what runs.
-    version = mkOpt types.str "0.7.0";
+    version = mkOpt types.str "0.7.1";
     installerUrl =
       mkOpt types.str "https://app.primeintellect.ai/prime-agent/install.sh";
     # npm global prefix; must be writable, so it lives under $HOME.
