@@ -24,7 +24,7 @@ import shutil
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 GH_BIN = os.environ.get("GH_BIN", "gh")
 STATE_PATH = Path(os.environ.get(
@@ -354,6 +354,24 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
     return items
 
 
+def _has_ignored_signature(item: dict, ignore_signatures: Sequence[str]) -> bool:
+    """Whether the body's last non-empty line is `-- <sig>` for a listed signature.
+
+    Signatures, not authors: every agent here authenticates to GitHub as the
+    human `jack-michaud`, so filtering on `item["author"]` would drop his real
+    review comments too. Last line only, so a comment quoting someone else's
+    signature still notifies.
+    """
+    if not ignore_signatures:
+        return False
+    body = item.get("body") or ""
+    lines = [line for line in body.splitlines() if line.strip()]
+    if not lines:
+        return False
+    last = lines[-1].strip()
+    return any(last == f"-- {sig}" for sig in ignore_signatures)
+
+
 # --------------------------------------------------------------- public ----
 
 async def watch(repo: str = ".", pr: Optional[Any] = None,
@@ -522,7 +540,8 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
                 notify: bool = True, seed: bool = True,
                 owner: Optional[str] = None,
                 notify_role: str = "parent",
-                notify_name: Optional[str] = None) -> str:
+                notify_name: Optional[str] = None,
+                ignore_signatures: Sequence[str] = ()) -> str:
     """Block here, polling a PR, and message an agent when activity settles.
 
     Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
@@ -535,6 +554,9 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     `watch_via_sibling()`, where the watcher's parent and the original caller
     are different sessions - must override these to reach the right session,
     e.g. `notify_role="sibling", notify_name=<original caller>`.
+
+    `ignore_signatures` keeps a watcher from waking its owner with the owner's
+    own signed comments; see `_has_ignored_signature`.
     """
     import time
 
@@ -583,9 +605,16 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
             errors += 1
             continue
         seen = _seen_now()
+        ignored: set = set()
         for i in items:
             if i.get("id") and i["id"] not in seen:
+                if _has_ignored_signature(i, ignore_signatures):
+                    ignored.add(i["id"])
+                    continue
                 pending[i["id"]] = i
+        if ignored:
+            _mark(ignored)
+            seen |= ignored
         for gone in [k for k in pending if k in seen]:   # acked while pending
             pending.pop(gone)
         if not pending:
@@ -618,7 +647,7 @@ CHILD_TASK = """You are a PR watcher. Make exactly ONE tool call and nothing els
     import pr_watch
     print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
                                poll_seconds={poll}, max_hours={hours},
-                               owner={owner!r}))
+                               owner={owner!r}, ignore_signatures={ignore!r}))
 
 That call BLOCKS for up to {hours} hours by design - this is expected, not a
 hang. It polls the PR inside that single cell and messages your parent itself
@@ -630,7 +659,8 @@ the same arguments unless your parent told you to stop."""
 async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
                           quiet_seconds: float = DEFAULT_QUIET_SECONDS,
                           poll_seconds: float = 30.0, max_hours: float = 6.0,
-                          name: str = "pr-watcher") -> dict:
+                          name: str = "pr-watcher",
+                          ignore_signatures: Sequence[str] = ()) -> dict:
     """Spawn a watcher sub-agent that pushes wake-ups instead of being polled.
 
     Costs one model turn to start; idle polling afterwards is free. Use instead
@@ -647,7 +677,8 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
     # keeps its own.
     task = CHILD_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
                              quiet=quiet_seconds, poll=poll_seconds,
-                             hours=max_hours, owner=_owner())
+                             hours=max_hours, owner=_owner(),
+                             ignore=tuple(ignore_signatures))
     handle = await rlm.run(task, name=name)
     return {"child": getattr(handle, "name", name), "owner": _owner(),
             "rlm_child_id": getattr(handle, "rlm_child_id", None),
@@ -696,7 +727,8 @@ else:
     print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
                                poll_seconds={poll}, max_hours={hours},
                                owner={owner!r}, notify_role="sibling",
-                               notify_name={caller!r}))
+                               notify_name={caller!r},
+                               ignore_signatures={ignore!r}))
 
 That call BLOCKS for up to {hours} hours by design - this is expected, not a
 hang. It polls the PR inside that single cell and messages session {caller!r}
@@ -710,7 +742,8 @@ When the call finally returns, call it again with the same arguments unless
 async def watch_via_sibling(repo: str = ".", pr: Optional[Any] = None,
                             quiet_seconds: float = DEFAULT_QUIET_SECONDS,
                             poll_seconds: float = 30.0, max_hours: float = 6.0,
-                            name: str = "pr-watcher") -> dict:
+                            name: str = "pr-watcher",
+                            ignore_signatures: Sequence[str] = ()) -> dict:
     """Ask THIS session's parent to spawn a watcher that reports back here.
 
     Use `watch_via_child()` normally; use `watch_via_sibling()` instead ONLY
@@ -741,7 +774,8 @@ async def watch_via_sibling(repo: str = ".", pr: Optional[Any] = None,
     caller = agents["current"]["name"]
     task = SIBLING_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
                                quiet=quiet_seconds, poll=poll_seconds,
-                               hours=max_hours, owner=_owner(), caller=caller)
+                               hours=max_hours, owner=_owner(), caller=caller,
+                               ignore=tuple(ignore_signatures))
     request = (
         f"pr-watch: I am at max RLM recursion depth and cannot spawn my own "
         f"watcher child. Please spawn a sub-agent named {name!r} with this "

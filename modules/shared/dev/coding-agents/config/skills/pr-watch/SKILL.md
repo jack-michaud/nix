@@ -98,6 +98,25 @@ review. Items reported once are marked seen and never repeat.
 - **`ack()` after replying.** The agent comments through the same GitHub account
   as its human, so its own reply reads as new activity and would wake it up to
   answer itself. `poll()` marks what it reports; `ack()` covers what you posted.
+- **`ignore_signatures=` for comments your own family posts.** An orchestrator
+  that posts disclosure comments on the PRs it watches wakes itself once per
+  comment (twice in one day on fay-service#7256 and #7257).
+  `serve()`, `watch_via_child()` and `watch_via_sibling()` take
+  `ignore_signatures=["Kalinda", "Bashaarat"]`: an item is skipped (silently,
+  but marked seen) when its body's LAST non-empty line is exactly `-- <name>`,
+  which is how these agents sign. Last line only, so a comment that *quotes*
+  another agent's signature still notifies; case-sensitive; items with no body
+  (a failing check-run) are never filtered. Default `()` - omit it and nothing
+  changes.
+  **Never "improve" this into author filtering:** every agent here
+  authenticates to GitHub as the human `jack-michaud`, so matching on the
+  author would silently swallow his real review comments.
+
+```python
+await pr_watch.watch_via_child(repo="/path/to/repo", pr=2,
+                               ignore_signatures=["Kalinda"])
+```
+
 - The heartbeat path runs every 3 minutes in `follow_up` mode, so it never
   interrupts work in progress. It is the fallback for when no sub-agent should
   be held open; `watch_via_child` is the default choice.
