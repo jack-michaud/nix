@@ -262,5 +262,115 @@ class ServeNotifyTargetTest(unittest.TestCase):
         self.assertEqual(sent[0]["receiver_name"], "original-caller-session")
 
 
+class IgnoreSignaturesTest(unittest.TestCase):
+    """Every agent authenticates as `jack-michaud`, so the trailing `-- <Name>`
+    signature - not the author - is what marks a comment as an agent's own."""
+
+    def _item(self, body, kind="comment"):
+        return {"kind": kind, "id": "x", "author": "jack-michaud", "body": body}
+
+    def test_no_signatures_listed_filters_nothing(self):
+        self.assertFalse(pr_watch._has_ignored_signature(
+            self._item("anything at all\n\n-- Kalinda"), ()))
+
+    def test_agent_signature_on_the_last_line_is_filtered(self):
+        self.assertTrue(pr_watch._has_ignored_signature(
+            self._item("Heads up, I pushed a fix.\n\n-- Kalinda"), ["Kalinda"]))
+
+    def test_unsigned_human_comment_is_not_filtered(self):
+        self.assertFalse(pr_watch._has_ignored_signature(
+            self._item("this needs a test"), ["Kalinda"]))
+
+    def test_a_comment_that_merely_quotes_a_signature_is_not_filtered(self):
+        body = ("Kalinda wrote:\n\n> done\n> -- Kalinda\n\n"
+                "...but that is not what I asked for.")
+        self.assertFalse(pr_watch._has_ignored_signature(
+            self._item(body), ["Kalinda"]))
+
+    def test_a_check_run_item_with_no_body_is_never_filtered(self):
+        self.assertFalse(pr_watch._has_ignored_signature(
+            {"kind": "check-run:failure", "id": "checkrun:1:failure",
+             "author": None, "body": None}, ["Kalinda"]))
+
+    def test_two_signatures_at_once(self):
+        self.assertTrue(pr_watch._has_ignored_signature(
+            self._item("ack\n-- Bashaarat"), ["Kalinda", "Bashaarat"]))
+        self.assertTrue(pr_watch._has_ignored_signature(
+            self._item("ack\n-- Kalinda"), ["Kalinda", "Bashaarat"]))
+        self.assertFalse(pr_watch._has_ignored_signature(
+            self._item("ack\n-- Nat"), ["Kalinda", "Bashaarat"]))
+
+    def test_matching_is_case_sensitive(self):
+        self.assertFalse(pr_watch._has_ignored_signature(
+            self._item("ack\n-- kalinda"), ["Kalinda"]))
+
+
+class ServeIgnoresSignedItemsTest(unittest.TestCase):
+    """A signed item must not be notified, must not count toward the "N new
+    item(s)" total, and must still be marked seen."""
+
+    def _comments(self):
+        return [
+            {"url": "c1", "author": {"login": "jack-michaud"},
+             "body": "Watching this PR.\n\n-- Kalinda",
+             "createdAt": "2024-01-01T00:00:00Z"},
+            {"url": "c2", "author": {"login": "jack-michaud"},
+             "body": "this needs a test",
+             "createdAt": "2024-01-01T00:00:01Z"},
+        ]
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 9, "url": "https://github.com/o/r/pull/9", "title": "t",
+                "comments": self._comments(), "reviews": [], "headRefOid": "deadbeef",
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def _serve(self, **kwargs):
+        import sys
+        import tempfile
+        from unittest.mock import MagicMock
+
+        sent = []
+
+        async def _fake_send(message, receiver_role=None, receiver_name=None):
+            sent.append(message)
+            return {"ok": True}
+
+        fake_agent_message = MagicMock()
+        fake_agent_message.send = _fake_send
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            with patch.object(pr_watch, "_gh",
+                              new=AsyncMock(side_effect=self._fake_gh)),                  patch.object(pr_watch, "STATE_PATH", state_path),                  patch.object(pr_watch, "_resolve_slug",
+                              new=AsyncMock(return_value="o/r")),                  patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+                _run(pr_watch.serve(repo=".", pr=9, quiet_seconds=0,
+                                    poll_seconds=0.01, max_hours=0.0005,
+                                    seed=False, **kwargs))
+                state = json.loads(state_path.read_text())
+        return sent, state
+
+    def test_default_reports_both_comments(self):
+        sent, _ = self._serve()
+        self.assertTrue(sent)
+        self.assertIn("2 new item(s)", sent[0])
+        self.assertIn("-- Kalinda", sent[0])
+
+    def test_signed_item_is_dropped_and_not_counted(self):
+        sent, state = self._serve(ignore_signatures=["Kalinda"])
+        self.assertTrue(sent)
+        self.assertIn("1 new item(s)", sent[0])
+        self.assertIn("this needs a test", sent[0])
+        self.assertNotIn("-- Kalinda", sent[0])
+        seen = next(iter(state["watches"].values()))["seen"]
+        self.assertIn("c1", seen)
+
+
 if __name__ == "__main__":
     unittest.main()
