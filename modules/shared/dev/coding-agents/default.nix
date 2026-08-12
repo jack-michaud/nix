@@ -137,6 +137,7 @@ in {
       # vendor-specific name Claude Code insists on.
       ".agents/AGENTS.md".source = agentsMd;
       ".claude/CLAUDE.md".source = agentsMd;
+      ".prime/agent/AGENTS.md".source = agentsMd;
       # pi has no native rules dir; this extension implements the same
       # contract (frontmatter `paths` triggers) over ~/.agents/rules.
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
