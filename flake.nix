@@ -104,6 +104,12 @@
             # Work laptop: no hardware-hacking tools
             modules.dev.hardware-hacking.enable = false;
             modules.dev.coding-agents.role = "work";
+            # On this work machine the vault root is ~/Documents, not ~/Vault:
+            # modules.dev.coding-agents.vaultDir appends "/Personal" to this,
+            # and Me.md/pages/outlines live directly under
+            # ~/Documents/Personal, matching the ~/Vault/Personal convention
+            # other machines use.
+            dotfiles.vaultDir = "/Users/jack/Documents";
           };
         };
 
