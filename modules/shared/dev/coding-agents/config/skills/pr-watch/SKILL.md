@@ -163,8 +163,17 @@ sign, and eating a merge notification would defeat the point.
   merged PR every 30s for the rest of its `max_hours` window and never mentioned
   the merge. The returned summary is what a caller keys evaluation-on-merge off.
 - **Every newly observed transition is appended to `~/.prime/agent/pr-watch/events.jsonl`**
-  (override with `PR_WATCH_EVENTS`), one JSON object per line:
-  `{"at", "repo", "pr", "kind", "id", "author", "url"}`, `repo` being the slug.
+  (override with `PR_WATCH_EVENTS`, which is re-read on every append so it can be
+  set after import), one JSON object per line:
+  `{"at", "repo", "pr", "kind", "id", "author", "url"}`, `repo` being the slug -
+  an entry whose `repo` is not `owner/name` is refused rather than written, since
+  this log is meant to be safe to trigger automation off. **Anything that writes
+  events in a test must redirect `PR_WATCH_EVENTS` (and `STATE_PATH`) to a
+  tmpdir**: this suite once appended five fixture lines to the real log, and a
+  fixture in a log that fires evals is a false trigger, not a mess. See
+  `IsolatedPaths` and `ProductionLogIsNeverTouchedTest` in the tests. Note that
+  the slug check does NOT substitute for that isolation - the leaked fixtures used
+  `repo="o/r"`, which is a well-formed slug.
   A notification only exists inside the session that receives it - a worker
   interruption on 2026-08-13 killed ten of eleven live watchers and took their
   unreported activity with them - whereas an append-only log lets any later

@@ -86,6 +86,27 @@ TERMINAL_KINDS = frozenset({"merged", "closed_unmerged"})
 
 # ----------------------------------------------------------- event log ----
 
+# `owner/name`, the only shape a log entry's `repo` may take. Checked on write
+# rather than trusted, because this log is meant to become the TRIGGER for
+# automated evaluation: a line naming something that is not a repository would
+# make an eval fire against nothing, and the failure would read as data rather
+# than as a bug. Deliberately narrow - exactly one slash, no path separators
+# either side - so a local checkout path (the pre-slug key format) is rejected.
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _events_path() -> Path:
+    """Where to append events, re-read from the environment on every call.
+
+    Not just the module-level `EVENTS_PATH` constant: that is resolved at import
+    time, so a test (or a caller) that sets `PR_WATCH_EVENTS` afterwards would
+    still write the real log. This module's own tests hit exactly that - five
+    fixture lines landed in the production log, in a file whose whole purpose is
+    to be trustworthy enough to trigger automation off.
+    """
+    return Path(os.environ.get("PR_WATCH_EVENTS") or EVENTS_PATH)
+
+
 def _log_event(slug: str, pr: Any, item: dict) -> None:
     """Append one observed transition to the durable JSONL event log.
 
@@ -105,8 +126,14 @@ def _log_event(slug: str, pr: Any, item: dict) -> None:
     failure is swallowed: a full disk, a read-only home, a bad path must not
     take down a watch that is otherwise working.
     """
+    if not _SLUG_RE.match(str(slug or "")):
+        # Refuse rather than write a line nothing downstream could act on. Not
+        # raising: the caller is a poll loop, and a malformed slug is a bug to
+        # find in the log's ABSENCE, not a reason to kill a working watch.
+        return
     try:
-        EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        path = _events_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps({
             "at": datetime.now(timezone.utc).isoformat(),
             "repo": slug,
@@ -116,7 +143,7 @@ def _log_event(slug: str, pr: Any, item: dict) -> None:
             "author": item.get("author"),
             "url": item.get("url"),
         }, default=str) + "\n"
-        with open(EVENTS_PATH, "a") as handle:
+        with open(path, "a") as handle:
             handle.write(line)
     except Exception:
         pass

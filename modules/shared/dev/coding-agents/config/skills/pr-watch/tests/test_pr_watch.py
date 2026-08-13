@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -20,9 +22,65 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pr_watch  # noqa: E402
 
+# The real files this suite must never touch. Recomputed from $HOME rather than
+# read off the module, because the module attributes get patched below - reading
+# them would make the guard test assert against its own tmpdir and pass
+# vacuously.
+REAL_STATE = Path.home() / ".prime/agent/pr-watch/state.json"
+REAL_EVENTS = Path.home() / ".prime/agent/pr-watch/events.jsonl"
+
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _fingerprint(path: Path):
+    """(size, mtime_ns) for a file, or None if it does not exist."""
+    if not path.exists():
+        return None
+    stat = path.stat()
+    return (stat.st_size, stat.st_mtime_ns)
+
+
+class IsolatedPaths:
+    """Redirect BOTH pr-watch files to a tmpdir. Every TestCase mixes this in.
+
+    An earlier revision of this suite patched `STATE_PATH` but not
+    `EVENTS_PATH`, so five fixture lines - `{"repo": "o/r", "pr": 9, ...}` and
+    friends - were appended to the real `~/.prime/agent/pr-watch/events.jsonl`,
+    which until then was empty. That is worse than untidy: the event log is
+    meant to be the trigger for automated evaluation, so a fixture sitting in it
+    is a false trigger waiting to fire on a PR that does not exist.
+
+    Belt and braces, because the two paths are resolved differently: the ENV
+    VARS cover `_events_path()`, which re-reads `PR_WATCH_EVENTS` on every call
+    (and any subprocess that might inherit them), while the module ATTRIBUTES
+    cover `STATE_PATH`, which is resolved once at import so its env var alone
+    would not redirect it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        tmp = Path(tmpdir.name)
+        self.state_path = tmp / "state.json"
+        self.events_path = tmp / "events.jsonl"
+        env = patch.dict(os.environ, {"PR_WATCH_STATE": str(self.state_path),
+                                      "PR_WATCH_EVENTS": str(self.events_path)})
+        env.start()
+        self.addCleanup(env.stop)
+        for attr, value in (("STATE_PATH", self.state_path),
+                            ("EVENTS_PATH", self.events_path)):
+            patcher = patch.object(pr_watch, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def logged_events(self) -> list[dict]:
+        if not self.events_path.exists():
+            return []
+        return [json.loads(line)
+                for line in self.events_path.read_text().splitlines() if line]
 
 
 def _check_run(id_: int, name: str, conclusion: str, page: int) -> dict:
@@ -35,10 +93,11 @@ def _check_run(id_: int, name: str, conclusion: str, page: int) -> dict:
     }
 
 
-class CheckRunPaginationTest(unittest.TestCase):
+class CheckRunPaginationTest(IsolatedPaths, unittest.TestCase):
     """Mirrors the real incident: 43 check-runs, the failing one past page 1."""
 
     def setUp(self):
+        super().setUp()
         # Page 1: 100 passing runs (a naive un-paginated call would stop here
         # and never see the failure that lives on page 2).
         self.page1 = {
@@ -92,7 +151,7 @@ class CheckRunPaginationTest(unittest.TestCase):
         self.assertEqual(failures, [])
 
 
-class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
+class ActivityFoldsInCheckRunFailuresTest(IsolatedPaths, unittest.TestCase):
     """`_activity()` must fold CI failures into the same items list comments use,
     so they ride poll()/serve()'s existing debounce and seen-tracking."""
 
@@ -136,7 +195,7 @@ class ActivityFoldsInCheckRunFailuresTest(unittest.TestCase):
         self.assertNotEqual(id_a, id_b)
 
 
-class RepoSlugResolutionTest(unittest.TestCase):
+class RepoSlugResolutionTest(IsolatedPaths, unittest.TestCase):
     """The jj-workspace bug: `gh` infers its repo from cwd's git remote, and a
     `jj workspace add` directory has no `.git`, so every gh call died with
     "failed to run git: fatal: not a git repository". serve() raised the instant
@@ -144,10 +203,9 @@ class RepoSlugResolutionTest(unittest.TestCase):
     it. Four live watchers were lost that way."""
 
     def setUp(self):
+        super().setUp()
         pr_watch._SLUG_CACHE.clear()
-
-    def tearDown(self):
-        pr_watch._SLUG_CACHE.clear()
+        self.addCleanup(pr_watch._SLUG_CACHE.clear)
 
     def test_falls_back_to_jj_origin_when_there_is_no_git_dir(self):
         async def _fake_run(binary, args, cwd):
@@ -203,7 +261,7 @@ class RepoSlugResolutionTest(unittest.TestCase):
             pr_watch._parse_github_url("ssh://git@github.com/o/r.git"), "o/r")
 
 
-class ServeNotifyTargetTest(unittest.TestCase):
+class ServeNotifyTargetTest(IsolatedPaths, unittest.TestCase):
     """serve()'s notify_role/notify_name override is what watch_via_sibling()
     relies on: a sibling-spawned watcher must message the ORIGINAL caller, not
     its own parent (a different session - the common parent). This is the
@@ -230,8 +288,6 @@ class ServeNotifyTargetTest(unittest.TestCase):
         raise AssertionError(f"unexpected gh call: {args}")
 
     def test_serve_notifies_the_given_role_and_name_not_parent(self):
-        import sys
-        import tempfile
         from unittest.mock import MagicMock
 
         sent = []
@@ -244,28 +300,26 @@ class ServeNotifyTargetTest(unittest.TestCase):
         fake_agent_message = MagicMock()
         fake_agent_message.send = _fake_send
 
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh_one_comment)), \
-                 patch.object(pr_watch, "STATE_PATH", state_path), \
-                 patch.object(pr_watch, "EVENTS_PATH", Path(tmp) / "events.jsonl"), \
-                 patch.object(pr_watch, "_resolve_slug",
-                              new=AsyncMock(return_value="o/r")), \
-                 patch.dict(sys.modules, {"agent_message": fake_agent_message}):
-                # Seed nothing (seed=False) so the pre-existing comment is
-                # immediately "new", and quiet_seconds=0 so it is reported on
-                # the very first poll instead of waiting out a debounce window.
-                _run(pr_watch.serve(
-                    repo=".", pr=9, quiet_seconds=0, poll_seconds=0.01,
-                    max_hours=0.0005, seed=False,
-                    notify_role="sibling", notify_name="original-caller-session",
-                ))
+        # State and event log come from IsolatedPaths - no test owns its own
+        # redirection any more, so none can forget half of it.
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh_one_comment)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")), \
+                patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+            # Seed nothing (seed=False) so the pre-existing comment is
+            # immediately "new", and quiet_seconds=0 so it is reported on
+            # the very first poll instead of waiting out a debounce window.
+            _run(pr_watch.serve(
+                repo=".", pr=9, quiet_seconds=0, poll_seconds=0.01,
+                max_hours=0.0005, seed=False,
+                notify_role="sibling", notify_name="original-caller-session",
+            ))
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]["receiver_role"], "sibling")
         self.assertEqual(sent[0]["receiver_name"], "original-caller-session")
 
 
-class IgnoreSignaturesTest(unittest.TestCase):
+class IgnoreSignaturesTest(IsolatedPaths, unittest.TestCase):
     """Every agent authenticates as `jack-michaud`, so the trailing `-- <Name>`
     signature - not the author - is what marks a comment as an agent's own."""
 
@@ -325,7 +379,7 @@ class IgnoreSignaturesTest(unittest.TestCase):
             self._item("ack\n-- kalinda"), ["Kalinda"]))
 
 
-class ServeIgnoresSignedItemsTest(unittest.TestCase):
+class ServeIgnoresSignedItemsTest(IsolatedPaths, unittest.TestCase):
     """A signed item must not be notified, must not count toward the "N new
     item(s)" total, and must still be marked seen."""
 
@@ -352,8 +406,6 @@ class ServeIgnoresSignedItemsTest(unittest.TestCase):
         raise AssertionError(f"unexpected gh call: {args}")
 
     def _serve(self, **kwargs):
-        import sys
-        import tempfile
         from unittest.mock import MagicMock
 
         sent = []
@@ -365,15 +417,15 @@ class ServeIgnoresSignedItemsTest(unittest.TestCase):
         fake_agent_message = MagicMock()
         fake_agent_message.send = _fake_send
 
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            with patch.object(pr_watch, "_gh",
-                              new=AsyncMock(side_effect=self._fake_gh)),                  patch.object(pr_watch, "STATE_PATH", state_path),                  patch.object(pr_watch, "EVENTS_PATH", Path(tmp) / "events.jsonl"),                  patch.object(pr_watch, "_resolve_slug",
-                              new=AsyncMock(return_value="o/r")),                  patch.dict(sys.modules, {"agent_message": fake_agent_message}):
-                _run(pr_watch.serve(repo=".", pr=9, quiet_seconds=0,
-                                    poll_seconds=0.01, max_hours=0.0005,
-                                    seed=False, **kwargs))
-                state = json.loads(state_path.read_text())
+        with patch.object(pr_watch, "_gh",
+                          new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")), \
+                patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+            _run(pr_watch.serve(repo=".", pr=9, quiet_seconds=0,
+                                poll_seconds=0.01, max_hours=0.0005,
+                                seed=False, **kwargs))
+        state = json.loads(self.state_path.read_text())
         return sent, state
 
     def test_default_reports_both_comments(self):
@@ -392,7 +444,7 @@ class ServeIgnoresSignedItemsTest(unittest.TestCase):
         self.assertIn("c1", seen)
 
 
-class LifecycleItemsTest(unittest.TestCase):
+class LifecycleItemsTest(IsolatedPaths, unittest.TestCase):
     """Merge/close detection, against the real `gh pr view --json` shapes.
 
     Field spellings verified live rather than guessed (`gh pr view --json` on
@@ -432,7 +484,7 @@ class LifecycleItemsTest(unittest.TestCase):
         self.assertEqual(pr_watch.TERMINAL_KINDS, {"merged", "closed_unmerged"})
 
 
-class DraftTransitionsTest(unittest.TestCase):
+class DraftTransitionsTest(IsolatedPaths, unittest.TestCase):
     """Draft flips come from timeline EVENTS, each with its own node id, not from
     the current `isDraft` boolean - a boolean has no id to dedup on, so
     draft -> ready -> draft would report at most one transition. Node ids and
@@ -476,7 +528,7 @@ class DraftTransitionsTest(unittest.TestCase):
         self.assertEqual(by_kind["ready_for_review"]["author"], "jack-michaud")
 
 
-class SlugKeyMigrationTest(unittest.TestCase):
+class SlugKeyMigrationTest(IsolatedPaths, unittest.TestCase):
     """The fay-ui#3733 bug: state keyed by local checkout path made the same PR
     watched from a jj workspace and from the canonical clone two independent
     ledgers, so ~24h of review comments stayed unseen by one of them. The key is
@@ -522,7 +574,7 @@ class SlugKeyMigrationTest(unittest.TestCase):
         self.assertEqual(watches[slug_key]["seen"], ["c1", "c2"])
 
 
-class ServeTerminatesOnMergeTest(unittest.TestCase):
+class ServeTerminatesOnMergeTest(IsolatedPaths, unittest.TestCase):
     """A merge must notify exactly once, end the loop, and land in the event log.
 
     Before this, `_activity()` fetched no merge fields at all, so a watcher
@@ -530,6 +582,7 @@ class ServeTerminatesOnMergeTest(unittest.TestCase):
     of its max_hours window polling a dead PR."""
 
     def setUp(self):
+        super().setUp()
         self.polls = 0
 
     async def _fake_gh(self, args, repo, check=True):
@@ -548,9 +601,7 @@ class ServeTerminatesOnMergeTest(unittest.TestCase):
             return json.dumps({"check_runs": []})
         raise AssertionError(f"unexpected gh call: {args}")
 
-    def _serve(self, **kwargs):
-        import sys
-        import tempfile
+    def _serve(self, seed=False, quiet_seconds=999, **kwargs):
         from unittest.mock import MagicMock
 
         sent = []
@@ -562,25 +613,19 @@ class ServeTerminatesOnMergeTest(unittest.TestCase):
         fake_agent_message = MagicMock()
         fake_agent_message.send = _fake_send
 
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            events_path = Path(tmp) / "events.jsonl"
-            with patch.object(pr_watch, "_gh",
-                              new=AsyncMock(side_effect=self._fake_gh)), \
-                    patch.object(pr_watch, "STATE_PATH", state_path), \
-                    patch.object(pr_watch, "EVENTS_PATH", events_path), \
-                    patch.object(pr_watch, "_resolve_slug",
-                                 new=AsyncMock(return_value="o/r")), \
-                    patch.dict(sys.modules, {"agent_message": fake_agent_message}):
-                # max_hours is generous on purpose: if the merge did NOT end the
-                # loop, this test would keep polling and the poll count assertion
-                # below would fail rather than the test passing by luck.
-                result = _run(pr_watch.serve(repo=".", pr=7256, quiet_seconds=999,
-                                             poll_seconds=0.01, max_hours=0.02,
-                                             seed=False, **kwargs))
-            events = [json.loads(line)
-                      for line in events_path.read_text().splitlines() if line]
-        return result, sent, events
+        with patch.object(pr_watch, "_gh",
+                          new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")), \
+                patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+            # max_hours is generous on purpose: if the merge did NOT end the
+            # loop, this test would keep polling and the poll count assertion
+            # below would fail rather than the test passing by luck.
+            result = _run(pr_watch.serve(repo=".", pr=7256,
+                                         quiet_seconds=quiet_seconds,
+                                         poll_seconds=0.01, max_hours=0.02,
+                                         seed=seed, **kwargs))
+        return result, sent, self.logged_events()
 
     def test_merge_notifies_once_and_returns_a_terminal_summary(self):
         result, sent, events = self._serve()
@@ -615,64 +660,130 @@ class ServeTerminatesOnMergeTest(unittest.TestCase):
     def test_an_already_seen_merge_still_ends_the_watch_without_notifying(self):
         # seed=True marks the existing merge as seen, so there is nothing to
         # report - but there is also nothing left to watch.
-        result, sent, _ = self._serve_seeded()
+        result, sent, _ = self._serve(seed=True, quiet_seconds=0)
         self.assertEqual(sent, [])
         self.assertIn("Already seen when this watch started", result)
         self.assertIn("merged", result)
 
-    def _serve_seeded(self):
-        import sys
-        import tempfile
-        from unittest.mock import MagicMock
-
-        sent = []
-
-        async def _fake_send(message, receiver_role=None, receiver_name=None):
-            sent.append(message)
-            return {"ok": True}
-
-        fake_agent_message = MagicMock()
-        fake_agent_message.send = _fake_send
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(pr_watch, "_gh",
-                              new=AsyncMock(side_effect=self._fake_gh)), \
-                    patch.object(pr_watch, "STATE_PATH", Path(tmp) / "state.json"), \
-                    patch.object(pr_watch, "EVENTS_PATH", Path(tmp) / "events.jsonl"), \
-                    patch.object(pr_watch, "_resolve_slug",
-                                 new=AsyncMock(return_value="o/r")), \
-                    patch.dict(sys.modules, {"agent_message": fake_agent_message}):
-                result = _run(pr_watch.serve(repo=".", pr=7256, quiet_seconds=0,
-                                             poll_seconds=0.01, max_hours=0.02,
-                                             seed=True))
-        return result, sent, None
-
-
-class EventLogNeverRaisesTest(unittest.TestCase):
+class EventLogNeverRaisesTest(IsolatedPaths, unittest.TestCase):
     """A logging failure must not kill a watch: the log is an aid to
-    reconstruction, not a precondition for watching."""
+    reconstruction, not a precondition for watching.
+
+    Note the redirection style here: `PR_WATCH_EVENTS` in the environment, not
+    the module attribute, because `_events_path()` reads the env var FIRST -
+    that precedence is what makes test isolation stick even for code paths (and
+    subprocesses) that never see a patched attribute.
+    """
 
     def test_an_unwritable_log_path_is_swallowed(self):
-        with patch.object(pr_watch, "EVENTS_PATH",
-                          Path("/proc/definitely/not/writable/events.jsonl")):
+        with patch.dict(os.environ,
+                        {"PR_WATCH_EVENTS":
+                         "/proc/definitely/not/writable/events.jsonl"}):
             pr_watch._log_event("o/r", 1, {"kind": "merged", "id": "merged:x"})
 
     def test_one_line_per_event_and_valid_json(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "events.jsonl"
-            with patch.object(pr_watch, "EVENTS_PATH", path):
-                for n in range(3):
-                    pr_watch._log_event("o/r", n, {"kind": "comment",
-                                                   "id": f"c{n}",
-                                                   "author": "reviewer",
-                                                   "url": f"u{n}"})
-            lines = path.read_text().splitlines()
+        for n in range(3):
+            pr_watch._log_event("o/r", n, {"kind": "comment", "id": f"c{n}",
+                                           "author": "reviewer", "url": f"u{n}"})
+        lines = self.events_path.read_text().splitlines()
         self.assertEqual(len(lines), 3)
         self.assertEqual([json.loads(line)["id"] for line in lines],
                          ["c0", "c1", "c2"])
 
+    def test_a_repo_that_is_not_a_slug_is_refused(self):
+        # Cheap sanity on the one field downstream automation keys off. A local
+        # path is the specific shape that used to get here: the pre-slug state
+        # key was `<checkout path>#<pr>@<owner>`.
+        for bad in ("/Users/jack/Code/github.com/fayhealthinc/fay-service",
+                    "fayhealthinc/fay-service/extra", "fay-service", "", None):
+            pr_watch._log_event(bad, 1, {"kind": "merged", "id": "merged:x"})
+        self.assertEqual(self.logged_events(), [])
 
-class PollTerminalDropsTheWatchTest(unittest.TestCase):
+    def test_a_well_formed_slug_is_accepted(self):
+        # Deliberately a slug that names no real repository: if isolation ever
+        # breaks again, a fixture line in the production log must not be able to
+        # trigger an eval against a PR that exists. (Learned the hard way - a
+        # `fayhealthinc/fay-service#7304 merged` FIXTURE line did leak into the
+        # real log while deliberately breaking the isolation to test this guard.)
+        pr_watch._log_event("test-owner/test-repo", 7304,
+                            {"kind": "merged", "id": "merged:41b75261"})
+        self.assertEqual([e["repo"] for e in self.logged_events()],
+                         ["test-owner/test-repo"])
+
+    def test_slug_validation_would_NOT_have_caught_the_fixture_leak(self):
+        # Honest limitation, recorded so nobody relies on the wrong guard: the
+        # fixtures that leaked into the production log used `repo="o/r"`, which
+        # IS a well-formed slug and is accepted here. Only the env/attribute
+        # isolation in IsolatedPaths - and the guard test below - actually
+        # prevents that leak.
+        pr_watch._log_event("o/r", 9, {"kind": "comment", "id": "c1"})
+        self.assertEqual(len(self.logged_events()), 1)
+
+
+class ProductionLogIsNeverTouchedTest(IsolatedPaths, unittest.TestCase):
+    """The guard for the defect this suite actually shipped once.
+
+    Five fixture lines were appended to the real
+    `~/.prime/agent/pr-watch/events.jsonl` by an earlier version of these
+    tests. This asserts, over a full `serve()` run that definitely logs, that
+    neither real file changed - and, so it cannot pass vacuously, that the
+    events went to the tmp log instead.
+    """
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 9, "url": "https://github.com/o/r/pull/9", "title": "t",
+                "comments": [{"url": "c1", "author": {"login": "reviewer"},
+                              "body": "hi", "createdAt": "2024-01-01T00:00:00Z"}],
+                "reviews": [], "headRefOid": "deadbeef", "state": "MERGED",
+                "isDraft": False, "mergedAt": "2024-01-02T00:00:00Z",
+                "mergeCommit": {"oid": "abc1234"},
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def test_a_full_serve_run_leaves_the_real_state_and_log_untouched(self):
+        from unittest.mock import MagicMock
+
+        before_events = _fingerprint(REAL_EVENTS)
+        before_state = _fingerprint(REAL_STATE)
+
+        fake_agent_message = MagicMock()
+
+        async def _fake_send(message, receiver_role=None, receiver_name=None):
+            return {"ok": True}
+
+        fake_agent_message.send = _fake_send
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")), \
+                patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+            _run(pr_watch.serve(repo=".", pr=9, quiet_seconds=0,
+                                poll_seconds=0.01, max_hours=0.02, seed=False))
+
+        # Not vacuous: the run really did log, just somewhere disposable.
+        kinds = {e["kind"] for e in self.logged_events()}
+        self.assertIn("merged", kinds)
+        self.assertIn("comment", kinds)
+        self.assertEqual(_fingerprint(REAL_EVENTS), before_events,
+                         f"{REAL_EVENTS} was modified by a test")
+        self.assertEqual(_fingerprint(REAL_STATE), before_state,
+                         f"{REAL_STATE} was modified by a test")
+
+    def test_the_isolation_itself_is_in_effect(self):
+        # If IsolatedPaths ever stops applying, this fails loudly instead of
+        # letting the whole suite quietly write to the real files again.
+        self.assertEqual(os.environ["PR_WATCH_EVENTS"], str(self.events_path))
+        self.assertEqual(pr_watch._events_path(), self.events_path)
+        self.assertEqual(pr_watch.STATE_PATH, self.state_path)
+        self.assertNotEqual(self.events_path, REAL_EVENTS)
+
+
+class PollTerminalDropsTheWatchTest(IsolatedPaths, unittest.TestCase):
     """poll() (the heartbeat path, not the blocking serve() path) must also stop
     paying for a dead PR: report the terminal state once and remove the watch."""
 
