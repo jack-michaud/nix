@@ -32,6 +32,18 @@ State lives in ~/.prime/agent/pr-watch/state.json so it survives a kernel
 restart; the heartbeat lives in the session, so it stops when the session ends.
 State (and the log) are keyed by the repo SLUG, not the local checkout path -
 see `_slug_key`.
+
+Merge-conflict detection (see `_lifecycle_items`'s `prev_mergeable` handling)
+rides the same stream too, for a reason GitHub gives no other hook for: a PR
+can drift from clean to `mergeable: CONFLICTING` purely because its BASE
+branch moved, and GitHub emits no comment/event for that - it is a pure
+git-level computation, invisible to everything else this module already
+watches. Confirmed live on fay-service#7294, which was rebased clean, watched,
+then silently went conflicting again after 4 more commits landed on main; the
+watcher never said a word. Unlike merge/close, a conflict is NOT terminal - it
+can resolve and recur - so `conflict_detected`/`conflict_resolved` items are
+reported once per transition EDGE (comparing the current poll's `mergeable`
+against a persisted `last_mergeable` baseline) and the watch keeps running.
 """
 
 from __future__ import annotations
@@ -89,7 +101,8 @@ class PrWatchError(RuntimeError):
 # own signed comments" is exactly the notification nobody would ever miss on
 # purpose.
 LIFECYCLE_KINDS = frozenset({
-    "merged", "closed_unmerged", "ready_for_review", "converted_to_draft"})
+    "merged", "closed_unmerged", "ready_for_review", "converted_to_draft",
+    "conflict_detected", "conflict_resolved"})
 
 # Kinds after which there is nothing left to watch: GitHub will not add review
 # activity to a merged or closed PR, so a watcher that keeps polling one is
@@ -682,8 +695,8 @@ async def _check_run_failures(repo: str, owner: str, name: str,
     return failures
 
 
-def _lifecycle_items(view: dict) -> list[dict]:
-    """Merge / unmerged-close items derived from `gh pr view`'s own fields.
+def _lifecycle_items(view: dict, prev_mergeable: Optional[str] = None) -> list[dict]:
+    """Merge / unmerged-close / conflict-transition items from `gh pr view`.
 
     Field spellings are gh's, checked against `gh pr view --json` rather than
     guessed: `state` is OPEN/CLOSED/MERGED, the merge timestamp is `mergedAt`
@@ -692,6 +705,20 @@ def _lifecycle_items(view: dict) -> list[dict]:
 
     The ids are stable and derived from the event, not from the poll, so the
     same merge observed by ten polls (or ten watchers) dedups to one item.
+
+    `mergeable` (checked live against real `gh pr view --json mergeable,
+    mergeStateStatus` output across fay-service's open PRs) takes exactly
+    three values: MERGEABLE, CONFLICTING, UNKNOWN - not the CLEAN/DIRTY names
+    used by `mergeStateStatus`, which is a coarser, differently-spelled field
+    (its own conflict value is DIRTY, not CONFLICTING) computed for other
+    purposes (CI status, branch protection) that this function does not need.
+    `mergeable` is the direct binary signal, so it is what gets diffed.
+    UNKNOWN means GitHub has not finished computing mergeability yet (a normal
+    transient after a push) and carries no information either way, so it is
+    treated as "no observation" on both sides of the comparison: a caller must
+    not let it clobber the last KNOWN mergeable value, or a still-conflicting
+    PR that transiently reads UNKNOWN would look like it "resolved" the moment
+    it flips back to a real value.
     """
     items: list[dict] = []
     merged_at = view.get("mergedAt")
@@ -708,17 +735,53 @@ def _lifecycle_items(view: dict) -> list[dict]:
             "kind": "closed_unmerged", "id": f"closed:{view.get('number')}",
             "author": None, "body": "closed without merging",
             "url": view.get("url"), "at": _ts(view.get("closedAt"))})
+    # Only a genuine edge is reported - not "still conflicting" on every poll -
+    # because a PR can flip between MERGEABLE and CONFLICTING many times over
+    # its life as its base branch moves, and a watcher that re-reported the
+    # unchanged state every poll would be spam a caller learns to ignore. The
+    # edge is detected by comparing against the CALLER's persisted last-known
+    # value (`prev_mergeable`), not by anything in this single `view` - a lone
+    # snapshot has no notion of "changed". This is deliberately not a terminal
+    # kind (see TERMINAL_KINDS): unlike a merge, a conflict can resolve and
+    # recur, so the watch must keep running after reporting it.
+    mergeable = view.get("mergeable")
+    if (mergeable and mergeable != "UNKNOWN"
+            and prev_mergeable and prev_mergeable != "UNKNOWN"
+            and mergeable != prev_mergeable):
+        head = view.get("headRefOid") or ""
+        if mergeable == "CONFLICTING":
+            items.append({
+                "kind": "conflict_detected",
+                "id": f"conflict-detected:{view.get('number')}:{head}",
+                "author": None,
+                "body": "base branch moved and now conflicts with this PR",
+                "url": view.get("url"), "at": _ts(view.get("updatedAt"))})
+        elif prev_mergeable == "CONFLICTING" and mergeable == "MERGEABLE":
+            items.append({
+                "kind": "conflict_resolved",
+                "id": f"conflict-resolved:{view.get('number')}:{head}",
+                "author": None, "body": "no longer conflicts with its base",
+                "url": view.get("url"), "at": _ts(view.get("updatedAt"))})
     return items
 
 
-async def _activity(repo: str, pr: Any) -> list[dict]:
+async def _activity(repo: str, pr: Any,
+                    prev_mergeable: Optional[str] = None
+                    ) -> tuple[list[dict], Optional[str]]:
     """Every comment-ish, CI-failure or lifecycle event on a PR, newest last,
-    as flat dicts with an id."""
+    as flat dicts with an id, plus this poll's raw `mergeable` value.
+
+    The caller (poll()/serve()) is responsible for persisting the returned
+    `mergeable` value and passing it back in as `prev_mergeable` on the next
+    call - see `_lifecycle_items` for why this function cannot detect a
+    conflict TRANSITION on its own from a single snapshot.
+    """
     raw = await _gh(["pr", "view", str(pr), "--json",
                      "number,url,title,comments,reviews,headRefOid,"
-                     "state,isDraft,mergedAt,mergeCommit,closedAt"], repo=repo)
+                     "state,isDraft,mergedAt,mergeCommit,closedAt,updatedAt,"
+                     "mergeable,mergeStateStatus"], repo=repo)
     view = json.loads(raw)
-    items: list[dict] = _lifecycle_items(view)
+    items: list[dict] = _lifecycle_items(view, prev_mergeable=prev_mergeable)
     for c in view.get("comments", []):
         items.append({"kind": "comment", "id": c.get("url"),
                       "author": (c.get("author") or {}).get("login"),
@@ -782,7 +845,7 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
             "at": _ts(run.get("completed_at") or run.get("started_at")),
         })
     items.sort(key=lambda i: i["at"])
-    return items
+    return items, view.get("mergeable")
 
 
 def _has_ignored_signature(item: dict, ignore_signatures: Sequence[str]) -> bool:
@@ -829,7 +892,7 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
     # looking at the result - not later inside a poll loop that swallows errors.
     slug = await _resolve_slug(repo)
     key = await _migrated_key(repo, pr)
-    items = await _activity(repo, pr) if seed else []
+    items, _ = await _activity(repo, pr) if seed else ([], None)
     # DISTINCT ids, not len(items): several items can share one id (a comment
     # that is also the first comment of a review thread carries the same url), so
     # reporting len(items) as "seeded" overstated the seen-set by one or more -
@@ -931,10 +994,24 @@ async def poll(mark_seen: bool = True, owner: Optional[str] = None) -> str:
         elif written_by > ENTRY_VERSION:
             newer_entries += 1
         try:
-            items = await _activity(entry["repo"], entry["pr"])
+            items, mergeable = await _activity(
+                entry["repo"], entry["pr"],
+                prev_mergeable=entry.get("last_mergeable"))
         except PrWatchError as exc:
             holding.append(f"{key}: poll failed ({exc})")
             continue
+        # Persisted immediately (not gated on the debounce window like `seen`
+        # below), so a transition is detected on exactly the ONE poll where it
+        # actually happens: if this waited for the item to be reported/marked
+        # seen, every poll during the quiet window would recompute the same
+        # edge against the still-stale persisted value and re-append a fresh
+        # `conflict_detected`/`conflict_resolved` item with a new id each time.
+        # Gated on `may_write` like every other mutation here - an entry that
+        # cannot be proved to belong to this session gets its conflict state
+        # (like everything else about it) reported, never written.
+        if may_write and mergeable and mergeable != "UNKNOWN":
+            entry["last_mergeable"] = mergeable
+            wrote = True
         slug = entry.get("slug") or key.split("#")[0]
         seen = set(entry.get("seen", []))
         fresh = [i for i in items if i.get("id") and i["id"] not in seen]
@@ -1066,9 +1143,8 @@ async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
         if entry is None:
             continue
         try:
-            current[key] = sorted(
-                {i["id"] for i in await _activity(entry["repo"], entry["pr"])
-                 if i.get("id")})
+            items, _ = await _activity(entry["repo"], entry["pr"])
+            current[key] = sorted({i["id"] for i in items if i.get("id")})
         except PrWatchError as exc:
             # One unreachable watch (deleted checkout, gh hiccup) must not abort
             # the ack of every other watch - the same abort-on-one-bad-entry shape
@@ -1224,13 +1300,24 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     # watcher armed from a jj workspace shares one seen-set with the same PR
     # watched from the canonical clone (see _slug_key).
     key = await _migrated_key(repo, pr, owner)
-    seeded = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")}) if seed else None
+    if seed:
+        seed_items, seed_mergeable = await _activity(repo, pr)
+        seeded = sorted({i["id"] for i in seed_items if i.get("id")})
+    else:
+        seeded = seed_mergeable = None
     with _locked():
         state = _load()
         entry = state["watches"].setdefault(key, {"repo": repo, "slug": slug,
                                                  "pr": pr,
                                                  "owner": _owner(owner)})
         entry["slug"] = slug
+        # Seeded here too, same reasoning as `seen`: without a baseline, the
+        # first real poll compares against None and (correctly) reports
+        # nothing, but a caller who wants ready visibility into "already
+        # conflicting when I started watching" should get that from `watch()`'s
+        # own return value, not from this transition machinery inventing one.
+        if seed_mergeable and seed_mergeable != "UNKNOWN":
+            entry["last_mergeable"] = seed_mergeable
         # `owner` given means this watch belongs to another session (the one that
         # spawned this watcher), so its fingerprint must come from the caller;
         # inventing this watcher's own would make the real owner's poll skip the
@@ -1257,6 +1344,25 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
                                               "owner": _owner(owner), "seen": []})
             e["seen"] = sorted(set(e.get("seen", [])) | ids)
             _save(st)
+
+    def _last_mergeable() -> Optional[str]:
+        with _locked():
+            return (_load()["watches"].get(key) or {}).get("last_mergeable")
+
+    def _mark_mergeable(value: Optional[str]) -> None:
+        # Same immediate-write reasoning as poll()'s: this must land BEFORE the
+        # debounce/pending logic below runs again, or the same transition edge
+        # gets recomputed (and re-appended with a fresh id) on every iteration
+        # of the loop until the item is finally reported.
+        if not value or value == "UNKNOWN":
+            return
+        with _locked():
+            st = _load()
+            e = st["watches"].setdefault(key, {"repo": repo, "slug": slug,
+                                              "pr": pr,
+                                              "owner": _owner(owner), "seen": []})
+            e["last_mergeable"] = value
+            _save(st)
     deadline = time.time() + max_hours * 3600.0
     sent = errors = 0
     pending: dict[str, dict] = {}
@@ -1274,10 +1380,12 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     while time.time() < deadline:
         await asyncio.sleep(poll_seconds)
         try:
-            items = await _activity(repo, pr)
+            items, mergeable = await _activity(repo, pr,
+                                               prev_mergeable=_last_mergeable())
         except PrWatchError:
             errors += 1
             continue
+        _mark_mergeable(mergeable)
         seen = _seen_now()
         for i in items:
             if i.get("id") and i["id"] not in seen and i["id"] not in pending:

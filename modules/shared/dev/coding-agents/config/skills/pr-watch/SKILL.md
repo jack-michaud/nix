@@ -1,6 +1,6 @@
 ---
 name: pr-watch
-description: Wake this agent when a watched GitHub PR receives comments, reviews, unresolved review threads, a failing CI check-run, or a lifecycle change (merged, closed unmerged, ready for review, converted to draft), after a quiet debounce window (default 3 minutes) so a burst of activity produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Every observed transition is also appended to a durable JSONL event log, so a PR's lifecycle is reconstructible even if the watching session dies. Use after opening a PR that a human will review, when you need to know the moment a PR merges (e.g. to trigger evaluation on merge), or when asked to keep an eye on a PR and respond to feedback.
+description: Wake this agent when a watched GitHub PR receives comments, reviews, unresolved review threads, a failing CI check-run, a lifecycle change (merged, closed unmerged, ready for review, converted to draft), or a merge-conflict transition (the base branch moved and the PR now conflicts, or a prior conflict just resolved), after a quiet debounce window (default 3 minutes) so a burst of activity produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Every observed transition is also appended to a durable JSONL event log, so a PR's lifecycle is reconstructible even if the watching session dies. Use after opening a PR that a human will review, when you need to know the moment a PR merges (e.g. to trigger evaluation on merge), when a PR's base branch is likely to keep moving and you need to know if it drifts into conflict, or when asked to keep an eye on a PR and respond to feedback.
 compatibility: Requires an authenticated `gh` and runs inside the agent kernel (it spawns a sub-agent, or registers an RLM heartbeat).
 ---
 
@@ -235,6 +235,42 @@ sign, and eating a merge notification would defeat the point.
   mean re-arm them (after `importlib.reload(pr_watch)` if the kernel is
   long-lived), newer entries mean THIS kernel is the stale one and its report
   cannot be trusted.
+## Merge-conflict detection
+
+`_activity()` also folds `mergeable,mergeStateStatus` into the SAME `gh pr
+view --json` call used for the lifecycle fields above (no extra round trip).
+Field values verified live against every open PR on fayhealthinc/fay-service
+(2026-08-13): `mergeable` takes exactly `MERGEABLE`, `CONFLICTING`, `UNKNOWN` -
+`mergeStateStatus` is a DIFFERENT, coarser field (its conflict value is
+`DIRTY`, not `CONFLICTING`) used for other purposes and not what this reads.
+
+- **Only a genuine EDGE is reported, never "still conflicting".** A PR can
+  drift from clean to conflicting and back many times as its base branch
+  moves, so this is not a terminal kind (see `TERMINAL_KINDS`) - the watch
+  keeps running after reporting `conflict_detected` or `conflict_resolved`.
+  The edge is detected by `_lifecycle_items(view, prev_mergeable=...)`
+  comparing the CURRENT poll's `mergeable` against the CALLER's persisted
+  `last_mergeable` (stored in the watch entry / passed via closures in
+  `serve()`), because a single `gh pr view` snapshot has no notion of
+  "changed" on its own. `UNKNOWN` (GitHub still computing mergeability, a
+  normal transient after a push) is treated as no-observation on EITHER side
+  of the comparison, and is never persisted over a real known value - or a
+  transient UNKNOWN reading between two CONFLICTING polls would look like a
+  resolve-then-reconflict that never happened.
+- **The persisted baseline is written immediately, not gated on the debounce
+  window.** If it waited for the item to be reported (like `seen` does), every
+  poll during the quiet window would recompute the same edge against the
+  still-stale baseline and mint a new item each time. `last_mergeable` updates
+  the moment a poll observes it, independently of whether the resulting item
+  has settled long enough to be reported yet.
+- **This was the exact gap that let fay-service#7294 drift silently.**
+  Rebased clean, watched by an armed sibling, then 4 more commits landed on
+  `main` and put it back into `mergeable: CONFLICTING` - GitHub emits no
+  comment/event for this (it is a pure git-level computation), so the
+  comment/review/check-run/lifecycle stream this module already watched could
+  not have seen it by construction. The watcher never said a word; a human
+  caught it by asking directly.
+
 - **`repo=` may be a `jj workspace add` directory.** Such a directory has no
   `.git`, so `gh` cannot infer the repo from it; pr-watch resolves
   `owner/name` itself (git `origin`, else `jj git remote list`'s `origin`,
