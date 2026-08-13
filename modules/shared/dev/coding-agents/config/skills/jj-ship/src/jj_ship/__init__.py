@@ -18,6 +18,9 @@ from typing import Any, Optional
 JJ_BIN = os.environ.get("JJ_BIN", "jj")
 GH_BIN = os.environ.get("GH_BIN", "gh")
 
+# Stamped into the PR body trailer; bump it when the attestation contract changes.
+VERSION = "0.2.0"
+
 
 class JjShipError(RuntimeError):
     """A jj/gh command failed, or a precondition was not met."""
@@ -370,10 +373,75 @@ async def _default_branch(repo: str = ".") -> Optional[str]:
     return name or None
 
 
+# --------------------------------------------------------------------------
+# attestations (contract and rationale: SKILL.md, "Attestations")
+# --------------------------------------------------------------------------
+# Unlike pr-watch's slug resolution (duplicated above, on purpose), attest is
+# IMPORTED: a second copy of the diff hash would drift and read as tampering.
+
+
+def _attest():
+    try:
+        import attest
+    except ImportError as exc:
+        raise JjShipError(
+            "the `attest` skill is not installed, so a non-draft PR cannot be "
+            "verified. Install it (it lives beside this skill in "
+            "config/skills/attest) or open the PR as draft=True."
+        ) from exc
+    return attest
+
+
+async def _verify_attestations(attestations: Optional[list[str]], repo: str,
+                               base: Optional[str], head: str,
+                               what: str) -> list[str]:
+    """Verify `attestations` against the diff about to be pushed; return token ids.
+
+    `base` defaults to the repo's default branch, matching what GitHub will diff
+    the PR against.
+    """
+    attest = _attest()
+    base = base or await _default_branch(repo=repo)
+    if not base:
+        raise JjShipError(
+            f"cannot verify attestations for {what}: the PR's base branch could "
+            f"not be determined, so there is no diff to bind them to. Pass "
+            f"base='<branch>'.")
+    try:
+        sha = await attest.diff_sha(repo, base, head)
+        payloads = attest.verify(attestations or [], sha)
+    except attest.AttestError as exc:
+        raise JjShipError(f"refusing {what}: {exc}") from exc
+    return [attest.token_id(t) for t in (attestations or [])]
+
+
+def attestation_trailer(token_ids: list[str]) -> str:
+    """The `Shipped-With:` line appended to an attested PR body.
+
+    It carries token IDs (sha256 prefixes), never the tokens: a token is a
+    bearer credential. Its purpose is detection - a PR opened outside this path
+    has no trailer, which is visible from GitHub alone.
+    """
+    return f"Shipped-With: jj_ship/{VERSION} attest=" + ",".join(token_ids)
+
+
+def _with_trailer(body: str, token_ids: list[str]) -> str:
+    trailer = attestation_trailer(token_ids)
+    if trailer in body:
+        return body
+    return (body.rstrip() + "\n\n" + trailer + "\n") if body.strip() else trailer + "\n"
+
+
 async def open_pr(title: str, body: str = "", repo: str = ".",
                   head: Optional[str] = None, base: Optional[str] = None,
-                  draft: bool = False, skip_wrap_check: bool = False) -> dict:
+                  draft: bool = False, skip_wrap_check: bool = False,
+                  attestations: Optional[list[str]] = None) -> dict:
     """Open a PR for the pushed bookmark, or return the existing one (idempotent).
+
+    A non-draft PR requires `attestations=[...]` carrying every claim in
+    `attest.REQUIRED_CLAIMS` (`design_reviewed` and `eval_passed`), each bound
+    to the diff being pushed; see the "attestations" section above. `draft=True`
+    requires none.
 
     Before submitting, `body` is checked with `find_hard_wrapped_lines()` and
     rejected with `JjShipError` if it finds any hard-wrapped prose (see that
@@ -416,6 +484,11 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
             f"refusing to open a PR from {head!r}, the repo's default branch - "
             f"the working copy has probably moved off the feature bookmark "
             f"(e.g. after `jj new {default}`). Pass head='<bookmark>' explicitly.")
+    # Before the idempotent early return, so a second call is held to the same bar.
+    if not draft:
+        token_ids = await _verify_attestations(
+            attestations, repo, base, head, "to open a non-draft PR")
+        body = _with_trailer(body, token_ids)
     existing = await find_pr(repo=repo, head=head)
     if existing and existing.get("state") == "OPEN":
         return {**existing, "created": False}
@@ -433,6 +506,33 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
     url = r["out"].strip().splitlines()[-1]
     pr = await find_pr(repo=repo, head=head) or {}
     return {**pr, "url": url, "created": True}
+
+
+async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
+                     head: Optional[str] = None, base: Optional[str] = None,
+                     attestations: Optional[list[str]] = None) -> dict:
+    """Take a draft PR out of draft, which requires the same attestations as
+    opening a non-draft one: draft -> ready is the moment a human is asked to
+    read it, and that is what the claims are about.
+
+    The `Shipped-With:` trailer is appended to the existing body here rather
+    than at draft time, because a draft's diff is expected to keep moving and a
+    trailer naming a stale token would be worse than none.
+    """
+    view = await _gh(["pr", "view", *_pr_arg(pr), "--json",
+                      "number,url,body,headRefName,baseRefName,isDraft"], repo=repo)
+    info = json.loads(view["out"])
+    token_ids = await _verify_attestations(
+        attestations, repo, base or info.get("baseRefName"),
+        head or info.get("headRefName"), "to mark a PR ready for review")
+    number = str(info["number"])
+    body = _with_trailer(info.get("body") or "", token_ids)
+    await _gh(["pr", "edit", number, "--body", body], repo=repo)
+    r = await _gh(["pr", "ready", number], repo=repo, check=False)
+    if r["code"] != 0 and "already" not in (r["err"] + r["out"]).lower():
+        raise JjShipError(f"gh pr ready failed: {r['err'] or r['out']}")
+    return {"number": info["number"], "url": info["url"], "ready": True,
+            "attestations": token_ids}
 
 
 def _pr_arg(pr: Optional[Any]) -> list[str]:
@@ -566,8 +666,14 @@ async def watch(pr: Optional[Any] = None, repo: str = ".", interval: float = 30,
 async def ship(message: str, bookmark: str, title: Optional[str] = None,
                body: str = "", repo: str = ".", base: Optional[str] = None,
                remote: str = "origin", draft: bool = False,
-               skip_wrap_check: bool = False) -> dict:
+               skip_wrap_check: bool = False, *,
+               attestations: Optional[list[str]] = None) -> dict:
     """commit -> push -> open PR, in one call. Returns each step's result.
+
+    The signature is unchanged for every existing caller: `attestations` is
+    keyword-only and defaults to None, which only raises on the non-draft path
+    (`open_pr` does the raising). `ship(..., draft=True)` still needs nothing,
+    so a mid-flight agent can keep drafting while it learns the new contract.
 
     Inherits `open_pr()`'s hard-wrap check on `body` (see its docstring) -
     `skip_wrap_check` is threaded through for the same rare opt-in escape
@@ -577,26 +683,31 @@ async def ship(message: str, bookmark: str, title: Optional[str] = None,
     p = await push(repo=repo, bookmark=bookmark, remote=remote)
     pr = await open_pr(title or message.splitlines()[0], body, repo=repo,
                        head=bookmark, base=base, draft=draft,
-                       skip_wrap_check=skip_wrap_check)
+                       skip_wrap_check=skip_wrap_check,
+                       attestations=attestations)
     return {"commit": c, "push": p, "pr": pr}
 
 
 _ACTIONS = {
     "status": status, "commit": commit, "push": push, "open-pr": open_pr,
     "checks": checks, "comments": comments, "watch": watch, "ship": ship,
-    "find-pr": find_pr,
+    "find-pr": find_pr, "mark-ready": mark_ready,
 }
 
 
 async def run(action: str = "status", repo: str = ".", message: str = "",
               bookmark: str = "", title: str = "", body: str = "",
               base: str = "", pr: str = "", interval: float = 30,
-              max_polls: int = 40) -> str:
+              max_polls: int = 40, attestations: str = "") -> str:
     """Drive the jj -> push -> PR -> CI loop.
 
-    action: status | commit | push | open-pr | find-pr | checks | comments | watch | ship
+    action: status | commit | push | open-pr | find-pr | checks | comments |
+            watch | ship | mark-ready
     Only the arguments an action needs are used; the result is returned as JSON.
+    `attestations` is a comma-separated list of tokens from the attest skill,
+    required for a non-draft open-pr / for mark-ready.
     """
+    tokens = [t.strip() for t in attestations.split(",") if t.strip()]
     kw: dict[str, Any] = {"repo": repo}
     if action in ("commit", "ship"):
         kw["message"] = message
@@ -606,8 +717,12 @@ async def run(action: str = "status", repo: str = ".", message: str = "",
         kw["title"] = title or message.splitlines()[0] if (title or message) else ""
         kw["body"] = body
         kw["base"] = base or None
-    if action in ("checks", "comments", "watch"):
+    if action in ("open-pr", "ship", "mark-ready"):
+        kw["attestations"] = tokens or None
+    if action in ("checks", "comments", "watch", "mark-ready"):
         kw["pr"] = pr or None
+    if action == "mark-ready":
+        kw["base"] = base or None
     if action == "watch":
         kw["interval"] = interval
         kw["max_polls"] = max_polls
