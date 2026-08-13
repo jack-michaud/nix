@@ -144,6 +144,10 @@ in {
       # to PATH (the installer's own profile edit is deliberately neutralised).
       home.sessionPath = [ "${prefix}/bin" ];
 
+      # Disable Prime Agent's pseudonymous usage/performance telemetry for
+      # shells that consume home-manager's session environment.
+      home.sessionVariables.PRIME_AGENT_TELEMETRY = "0";
+
       # ...but `home.sessionPath` only ever writes `hm-session-vars.sh`, which
       # a POSIX shell sources and fish CANNOT. Jack's login shell is fish
       # (/usr/bin/fish, and `modules.shells.fish` is not enabled on DARKFOREST,
@@ -155,6 +159,7 @@ in {
       home.file.".config/fish/conf.d/prime-agent.fish".text = ''
         # Managed by modules.dev.prime-agent - do not edit.
         fish_add_path --global --prepend ${prefix}/bin
+        set -gx PRIME_AGENT_TELEMETRY 0
       '';
 
       home.activation = {
