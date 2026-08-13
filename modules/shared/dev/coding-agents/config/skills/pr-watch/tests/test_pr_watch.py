@@ -208,7 +208,7 @@ class ActivityFoldsInCheckRunFailuresTest(IsolatedPaths, unittest.TestCase):
         with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
                 patch.object(pr_watch, "_resolve_slug",
                              new=AsyncMock(return_value="o/r")):
-            items = _run(pr_watch._activity(".", 7))
+            items, _ = _run(pr_watch._activity(".", 7))
         kinds = [i["kind"] for i in items]
         self.assertIn("check-run:failure", kinds)
         failure = next(i for i in items if i["kind"] == "check-run:failure")
@@ -512,6 +512,70 @@ class LifecycleItemsTest(IsolatedPaths, unittest.TestCase):
         self.assertTrue(pr_watch.TERMINAL_KINDS <= pr_watch.LIFECYCLE_KINDS)
         self.assertEqual(pr_watch.TERMINAL_KINDS, {"merged", "closed_unmerged"})
 
+    def test_conflict_kinds_are_lifecycle_but_not_terminal(self):
+        # A conflict can resolve and recur - a watch must keep running after
+        # reporting one, unlike a merge/close - so these kinds are NOT terminal.
+        self.assertLessEqual({"conflict_detected", "conflict_resolved"},
+                             pr_watch.LIFECYCLE_KINDS)
+        self.assertFalse(pr_watch.TERMINAL_KINDS
+                         & {"conflict_detected", "conflict_resolved"})
+
+
+class ConflictLifecycleItemsTest(IsolatedPaths, unittest.TestCase):
+    """`mergeable` transitions, against the real `gh pr view --json` shapes.
+
+    Field spellings and values verified live (`gh pr list --repo
+    fayhealthinc/fay-service --json number,mergeable,mergeStateStatus` across
+    every open PR there, 2026-08-13): `mergeable` takes exactly MERGEABLE,
+    CONFLICTING, UNKNOWN - not the CLEAN/DIRTY names `mergeStateStatus` uses for
+    the same fact (fay-service#7300, #7212, #7169 etc. were all `mergeable:
+    CONFLICTING, mergeStateStatus: DIRTY` at once).
+    """
+
+    def _view(self, mergeable, head="deadbeef"):
+        return {
+            "number": 42, "url": "https://github.com/o/r/pull/42",
+            "state": "OPEN", "isDraft": False, "mergedAt": None,
+            "mergeCommit": None, "headRefOid": head,
+            "updatedAt": "2026-08-13T12:00:00Z", "mergeable": mergeable,
+        }
+
+    def test_mergeable_to_conflicting_yields_conflict_detected(self):
+        items = pr_watch._lifecycle_items(
+            self._view("CONFLICTING"), prev_mergeable="MERGEABLE")
+        self.assertEqual([i["kind"] for i in items], ["conflict_detected"])
+        self.assertEqual(items[0]["id"], "conflict-detected:42:deadbeef")
+
+    def test_conflicting_to_mergeable_yields_conflict_resolved(self):
+        items = pr_watch._lifecycle_items(
+            self._view("MERGEABLE"), prev_mergeable="CONFLICTING")
+        self.assertEqual([i["kind"] for i in items], ["conflict_resolved"])
+        self.assertEqual(items[0]["id"], "conflict-resolved:42:deadbeef")
+
+    def test_unchanged_mergeable_yields_nothing(self):
+        self.assertEqual(pr_watch._lifecycle_items(
+            self._view("CONFLICTING"), prev_mergeable="CONFLICTING"), [])
+        self.assertEqual(pr_watch._lifecycle_items(
+            self._view("MERGEABLE"), prev_mergeable="MERGEABLE"), [])
+
+    def test_no_baseline_yields_nothing(self):
+        # prev_mergeable=None means "never observed before" (e.g. the very
+        # first poll of a freshly-armed watch) - not "was clean", so a PR that
+        # happens to already be conflicting when first watched must not be
+        # reported as a fresh transition out of thin air.
+        self.assertEqual(pr_watch._lifecycle_items(
+            self._view("CONFLICTING"), prev_mergeable=None), [])
+
+    def test_unknown_on_either_side_yields_nothing(self):
+        # UNKNOWN is GitHub still computing mergeability, not a real state - it
+        # must not be treated as a transition in either direction, and (per the
+        # caller contract in poll()/serve()) must not overwrite a real
+        # persisted value either.
+        self.assertEqual(pr_watch._lifecycle_items(
+            self._view("UNKNOWN"), prev_mergeable="MERGEABLE"), [])
+        self.assertEqual(pr_watch._lifecycle_items(
+            self._view("CONFLICTING"), prev_mergeable="UNKNOWN"), [])
+
 
 class DraftTransitionsTest(IsolatedPaths, unittest.TestCase):
     """Draft flips come from timeline EVENTS, each with its own node id, not from
@@ -547,7 +611,7 @@ class DraftTransitionsTest(IsolatedPaths, unittest.TestCase):
         with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
                 patch.object(pr_watch, "_resolve_slug",
                              new=AsyncMock(return_value="o/r")):
-            items = _run(pr_watch._activity(".", 7292))
+            items, _ = _run(pr_watch._activity(".", 7292))
         by_kind = {i["kind"]: i for i in items}
         self.assertIn("converted_to_draft", by_kind)
         self.assertIn("ready_for_review", by_kind)
@@ -868,6 +932,77 @@ class PollTerminalDropsTheWatchTest(IsolatedPaths, unittest.TestCase):
         self.assertEqual(len(watches), 1)              # not dropped
         self.assertEqual(watches["o/r#7304@ancestor-id"]["seen"], [])   # not drained
         self.assertIn("READ-ONLY", second)             # and it keeps reporting
+
+
+class ConflictTransitionPollTest(IsolatedPaths, unittest.TestCase):
+    """poll() must detect a mergeable CLEAN<->CONFLICTING edge, report it
+    exactly once per edge, keep the watch alive (unlike a merge), and not
+    re-report while the state holds steady across polls."""
+
+    def setUp(self):
+        super().setUp()
+        self.mergeable = "MERGEABLE"
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 7300, "url": "https://github.com/o/r/pull/7300",
+                "title": "t", "comments": [], "reviews": [],
+                "headRefOid": "cafe1234", "state": "OPEN", "isDraft": False,
+                "mergedAt": None, "mergeCommit": None,
+                "updatedAt": "2026-08-13T12:00:00Z",
+                "mergeable": self.mergeable,
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def _seed(self, **extra):
+        key = f"o/r#7300@{pr_watch._owner()}"
+        entry = {"repo": ".", "slug": "o/r", "pr": 7300,
+                 "owner": pr_watch._owner(), "seen": [], "quiet_seconds": 0}
+        entry.update(extra)
+        self.state_path.write_text(json.dumps({"watches": {key: entry}}))
+        return key
+
+    def _poll(self):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)),                 patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            return _run(pr_watch.poll())
+
+    def test_flip_to_conflicting_is_reported_once_and_watch_survives(self):
+        key = self._seed(session="test-session", last_mergeable="MERGEABLE")
+        self.mergeable = "CONFLICTING"
+        first = self._poll()
+        self.assertIn("conflict_detected", first)
+        watches = json.loads(self.state_path.read_text())["watches"]
+        # Unlike a merge, the watch is NOT dropped - a conflict can resolve and
+        # recur, so there is still something to watch.
+        self.assertIn(key, watches)
+        self.assertEqual(watches[key]["last_mergeable"], "CONFLICTING")
+        second = self._poll()
+        self.assertNotIn("conflict_detected", second)   # no re-report, unchanged
+
+    def test_flip_back_to_mergeable_is_reported_as_resolved(self):
+        self._seed(session="test-session", last_mergeable="CONFLICTING",
+                  seen=["conflict-detected:7300:cafe1234"])
+        self.mergeable = "MERGEABLE"
+        result = self._poll()
+        self.assertIn("conflict_resolved", result)
+
+    def test_a_fresh_watch_with_no_persisted_baseline_reports_nothing(self):
+        # First-ever poll of an entry with no `last_mergeable` at all (e.g. one
+        # armed before this feature existed): must not invent a transition out
+        # of a PR simply being conflicting when first observed.
+        self._seed(session="test-session")
+        self.mergeable = "CONFLICTING"
+        result = self._poll()
+        self.assertNotIn("conflict_detected", result)
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertEqual(list(watches.values())[0]["last_mergeable"],
+                         "CONFLICTING")   # baseline is captured for next time
 
 
 class CrossSessionDrainTest(IsolatedPaths, unittest.TestCase):
@@ -1312,6 +1447,70 @@ class StaleModuleIsDetectableTest(IsolatedPaths, unittest.TestCase):
         entry = next(iter(json.loads(self.state_path.read_text())["watches"].values()))
         self.assertEqual(entry["entry_version"], pr_watch.ENTRY_VERSION)
         self.assertEqual(entry["session"], "test-session")
+
+
+class ServeReportsConflictWithoutTerminatingTest(IsolatedPaths, unittest.TestCase):
+    """Unlike a merge, a conflict must NOT end serve()'s loop - it can resolve
+    and recur - so this exercises that the notification fires and the loop
+    keeps polling (proven by outrunning max_hours rather than returning early
+    on the transition, the way ServeTerminatesOnMergeTest's merge does)."""
+
+    def setUp(self):
+        super().setUp()
+        self.mergeable = "MERGEABLE"
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 7300, "url": "https://github.com/o/r/pull/7300",
+                "title": "t", "comments": [], "reviews": [],
+                "headRefOid": "cafe1234", "state": "OPEN", "isDraft": False,
+                "mergedAt": None, "mergeCommit": None,
+                "updatedAt": "2026-08-13T12:00:00Z",
+                "mergeable": self.mergeable,
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def test_conflict_notifies_and_the_watch_keeps_running(self):
+        from unittest.mock import MagicMock
+
+        sent = []
+
+        async def _fake_send(message, receiver_role=None, receiver_name=None):
+            sent.append(message)
+            return {"ok": True}
+
+        fake_agent_message = MagicMock()
+        fake_agent_message.send = _fake_send
+
+        async def _flip_then_hold():
+            # Flip to CONFLICTING shortly after the loop starts, then hold -
+            # exactly the shape of a base branch moving once and staying moved.
+            await asyncio.sleep(0.02)
+            self.mergeable = "CONFLICTING"
+
+        async def _run_both():
+            _, result = await asyncio.gather(
+                _flip_then_hold(),
+                pr_watch.serve(repo=".", pr=7300, quiet_seconds=0.01,
+                               poll_seconds=0.01, max_hours=0.01, seed=False))
+            return result
+
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")), \
+                patch.dict(sys.modules, {"agent_message": fake_agent_message}):
+            result = _run(_run_both())
+        self.assertIn("conflict_detected", "\n".join(sent))
+        # The loop ran its whole max_hours window rather than stopping the
+        # moment it observed the conflict - the defining difference from a
+        # merge, which ends serve() immediately.
+        self.assertIn("Re-arm to keep watching", result)
+        self.assertNotIn("TERMINAL", result)
 
 
 class SeededCountMatchesWhatWasStoredTest(IsolatedPaths, unittest.TestCase):
