@@ -1092,5 +1092,265 @@ class ConvergeKeysUnionsBothFormsTest(IsolatedPaths, unittest.TestCase):
         self.assertEqual(json.loads(self.state_path.read_text()), first)
 
 
+class DeadCheckoutDoesNotKillTheFleetTest(IsolatedPaths, unittest.TestCase):
+    """The 2026-08-13 fleet outage: ONE watch pointing at a deleted checkout made
+    `poll()` raise for EVERY session.
+
+    `_converge_keys()` runs first and calls `git -C <path>` with `cwd=path`;
+    `asyncio.create_subprocess_exec` raises `FileNotFoundError`, which is an
+    OSError and NOT a `PrWatchError`, so `except PrWatchError: continue` never saw
+    it and the pass died before reading a single item. Four agents hit it
+    independently within minutes, and the symptom was silence.
+    """
+
+    DEAD = "/private/tmp/fay-webflow-custom-code"     # the real path from the incident
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 7292, "url": "https://github.com/o/r/pull/7292",
+                "title": "t", "state": "OPEN", "isDraft": False,
+                "mergedAt": None, "mergeCommit": None, "headRefOid": "deadbeef",
+                "reviews": [],
+                "comments": [{"url": "c1", "author": {"login": "reviewer"},
+                              "body": "please fix", "createdAt": "2024-01-01T00:00:00Z"}],
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def setUp(self):
+        super().setUp()
+        self.assertFalse(Path(self.DEAD).exists(), "test needs this path absent")
+        self.live = str(Path(__file__).resolve().parents[1])   # a directory that exists
+        self.dead_key = f"{self.DEAD}#399@someone-else"
+        self.live_key = "o/r#7292@test-owner"
+        self.state_path.write_text(json.dumps({"watches": {
+            # Another session's watch, on a checkout that no longer exists.
+            self.dead_key: {"repo": self.DEAD, "pr": 399,
+                            "owner": "someone-else", "seen": ["keep-me"],
+                            "quiet_seconds": 0},
+            # This session's watch, which must still be polled.
+            self.live_key: {"repo": self.live, "slug": "o/r", "pr": 7292,
+                            "owner": "test-owner", "session": "test-session",
+                            "seen": [], "quiet_seconds": 0},
+        }}))
+
+    async def _fake_resolve(self, repo, allow_ambient=True):
+        """Realistic resolution: the live checkout resolves, the dead one cannot.
+
+        An earlier version of this test patched `_resolve_slug` to return "o/r"
+        for EVERYTHING, which made the deleted path resolvable and let
+        convergence legitimately re-key the dead entry - the test then failed for
+        its own artificial reason. Faking the failure is the point of the test.
+        """
+        if not os.path.isdir(repo):
+            raise pr_watch.PrWatchError(f"cannot determine the GitHub repo for {repo!r}")
+        return "o/r"
+
+    def _poll(self):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(side_effect=self._fake_resolve)):
+            return _run(pr_watch.poll())
+
+    def test_run_returns_a_status_for_a_missing_cwd_instead_of_raising(self):
+        rc, out, err = _run(pr_watch._run("git", ["status"], cwd=self.DEAD))
+        self.assertEqual(rc, 127)
+        self.assertIn("cwd does not exist", err)
+
+    def test_gh_raises_the_modules_own_error_for_a_missing_cwd(self):
+        with self.assertRaises(pr_watch.PrWatchError) as ctx:
+            _run(pr_watch._gh(["pr", "view", "1"], repo=self.DEAD))
+        self.assertIn("checkout is gone", str(ctx.exception))
+
+    def test_poll_survives_and_still_reports_the_healthy_watch(self):
+        report = self._poll()
+        self.assertIn("c1", report)             # the live watch was still polled
+        self.assertIn("7292", report)
+
+    def test_the_dead_entry_is_left_completely_alone(self):
+        before = json.loads(self.state_path.read_text())["watches"][self.dead_key]
+        self._poll()
+        after = json.loads(self.state_path.read_text())["watches"][self.dead_key]
+        # Not dropped, not re-keyed, seen-set intact: it belongs to another
+        # session and a deleted seen-set is unrecoverable.
+        self.assertEqual(after, before)
+        self.assertEqual(after["seen"], ["keep-me"])
+
+    def test_convergence_does_not_rewrite_a_dead_entry_using_ambient_GH_REPO(self):
+        # The trap in the obvious mitigation: `_resolve_slug` honours GH_REPO as a
+        # last resort, so an existing-but-not-a-repo path would resolve to
+        # whatever the POLLING kernel exports - silently re-pointing a stranger's
+        # webflow watch at fay-service, under their owner id.
+        pr_watch._SLUG_CACHE.clear()
+        pr_watch._AMBIENT_SLUG_PATHS.clear()
+        self.addCleanup(pr_watch._SLUG_CACHE.clear)
+        self.addCleanup(pr_watch._AMBIENT_SLUG_PATHS.clear)
+        not_a_repo = str(Path(self.state_path).parent / "exists-but-not-a-repo")
+        Path(not_a_repo).mkdir()
+        state = json.loads(self.state_path.read_text())
+        state["watches"][f"{not_a_repo}#399@someone-else"] = {
+            "repo": not_a_repo, "pr": 399, "owner": "someone-else",
+            "seen": ["keep-me"], "quiet_seconds": 0}
+        self.state_path.write_text(json.dumps(state))
+        with patch.dict(os.environ, {"GH_REPO": "fayhealthinc/fay-service"}):
+            _run(pr_watch._converge_keys())
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertIn(f"{not_a_repo}#399@someone-else", watches)
+        self.assertNotIn("fayhealthinc/fay-service#399@someone-else", watches)
+
+    def test_unwatch_can_still_remove_a_dead_checkouts_watch(self):
+        # The automatic paths leave it alone; a deliberate unwatch must work, or
+        # the entry is unremovable.
+        with patch.dict(os.environ, {"PR_WATCH_OWNER": "someone-else"}):
+            report = _run(pr_watch.unwatch(repo=self.DEAD, pr=399))
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertNotIn(self.dead_key, watches)
+        self.assertIn("no longer watching", report)
+
+    def test_ack_skips_an_unreachable_watch_instead_of_aborting(self):
+        with patch.dict(os.environ, {"PR_WATCH_OWNER": "someone-else",
+                                     "PR_WATCH_SESSION": "someone-elses-session"}), \
+                patch.object(pr_watch, "_gh",
+                             new=AsyncMock(side_effect=self._fake_gh)):
+            report = _run(pr_watch.ack(repo=self.DEAD, pr=399))
+        self.assertIn("could not be reached", report)
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertEqual(watches[self.dead_key]["seen"], ["keep-me"])
+
+
+class BasenameKeyConvergesTest(IsolatedPaths, unittest.TestCase):
+    """A duplicate that survived convergence live: the stale key
+    `fay-service-ret227#7292` is a jj-workspace BASENAME, so it is neither a slug
+    nor an absolute path, and a `startswith("/")` guard skipped it - leaving a
+    second ledger for that PR with `session: None` beside the canonical
+    fingerprinted entry, which is the shape the fleet is in right now."""
+
+    def test_a_basename_form_key_is_converged_and_unioned(self):
+        stale = "fay-service-ret227#7292@own"
+        canonical = "fayhealthinc/fay-service#7292@own"
+        self.state_path.write_text(json.dumps({"watches": {
+            stale: {"repo": "/workspaces/fay-service-ret227", "pr": 7292,
+                    "owner": "own", "seen": ["c1"], "session": None},
+            canonical: {"repo": "/canonical", "pr": 7292, "owner": "own",
+                        "seen": ["c2"], "session": "/artifacts/x/sub-1111",
+                        "entry_version": pr_watch.ENTRY_VERSION},
+        }}))
+        with patch.object(pr_watch, "_resolve_slug",
+                          new=AsyncMock(return_value="fayhealthinc/fay-service")):
+            _run(pr_watch._converge_keys())
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertEqual(list(watches), [canonical])
+        self.assertEqual(watches[canonical]["seen"], ["c1", "c2"])
+        # `session: None` on the stale side must not clobber the real fingerprint,
+        # or the surviving entry degrades to read-only for its own owner.
+        self.assertEqual(watches[canonical]["session"], "/artifacts/x/sub-1111")
+
+    def test_a_canonical_slug_key_is_left_alone(self):
+        canonical = "fayhealthinc/fay-service#7292@own"
+        self.state_path.write_text(json.dumps({"watches": {canonical: {
+            "repo": "/canonical", "pr": 7292, "owner": "own", "seen": ["c2"]}}}))
+        with patch.object(pr_watch, "_resolve_slug",
+                          new=AsyncMock(side_effect=AssertionError(
+                              "must not re-resolve an already-canonical key"))):
+            _run(pr_watch._converge_keys())
+        self.assertEqual(list(json.loads(self.state_path.read_text())["watches"]),
+                         [canonical])
+
+
+class StaleModuleIsDetectableTest(IsolatedPaths, unittest.TestCase):
+    """A long-lived kernel keeps running the pr_watch it imported hours ago, so an
+    agent can re-arm a watch, get the OLD code, and believe it is covered. Version
+    skew is therefore reported in both directions - the dangerous one is invisible
+    from inside the stale kernel."""
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 1, "url": "https://github.com/o/r/pull/1", "title": "t",
+                "state": "OPEN", "isDraft": False, "mergedAt": None,
+                "mergeCommit": None, "headRefOid": "x", "reviews": [],
+                "comments": []})
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        return json.dumps({"check_runs": []})
+
+    def _poll_with(self, entry_version):
+        entry = {"repo": str(Path(__file__).resolve().parents[1]), "slug": "o/r",
+                 "pr": 1, "owner": "test-owner", "session": "test-session",
+                 "seen": [], "quiet_seconds": 0}
+        if entry_version is not None:
+            entry["entry_version"] = entry_version
+        self.state_path.write_text(json.dumps({"watches": {"o/r#1@test-owner": entry}}))
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            return _run(pr_watch.poll())
+
+    def test_an_entry_with_no_version_is_flagged_as_older(self):
+        report = self._poll_with(None)
+        self.assertIn("armed by an OLDER pr_watch", report)
+        self.assertIn("importlib.reload", report)
+
+    def test_an_entry_from_a_newer_module_says_THIS_kernel_is_stale(self):
+        report = self._poll_with(pr_watch.ENTRY_VERSION + 1)
+        self.assertIn("THIS kernel is the stale one", report)
+
+    def test_a_current_entry_is_not_flagged(self):
+        report = self._poll_with(pr_watch.ENTRY_VERSION)
+        self.assertNotIn("OLDER pr_watch", report)
+        self.assertNotIn("stale one", report)
+
+    def test_arming_stamps_the_current_version(self):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            _run(pr_watch.watch(repo=".", pr=1, heartbeat=False))
+        entry = next(iter(json.loads(self.state_path.read_text())["watches"].values()))
+        self.assertEqual(entry["entry_version"], pr_watch.ENTRY_VERSION)
+        self.assertEqual(entry["session"], "test-session")
+
+
+class SeededCountMatchesWhatWasStoredTest(IsolatedPaths, unittest.TestCase):
+    """`seeded` counted ITEMS, not distinct ids, so a comment that is also the
+    first comment of a review thread (same url) inflated it - 11 reported against
+    10 stored, live - and the resulting single re-report looked like a
+    notification bug rather than an off-by-one in the report."""
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 5, "url": "https://github.com/o/r/pull/5", "title": "t",
+                "state": "OPEN", "isDraft": False, "mergedAt": None,
+                "mergeCommit": None, "headRefOid": "x", "reviews": [],
+                "comments": [{"url": "dup", "author": {"login": "r"}, "body": "b",
+                              "createdAt": "2024-01-01T00:00:00Z"}]})
+        if args[0] == "api" and args[1] == "graphql":
+            # The SAME url as the issue comment: one id, two items.
+            return json.dumps({"data": {"repository": {"pullRequest": {
+                "reviewThreads": {"nodes": [{"id": "t1", "isResolved": False,
+                                             "path": "f.py",
+                                             "comments": {"nodes": [
+                                                 {"author": {"login": "r"},
+                                                  "body": "b",
+                                                  "createdAt": "2024-01-01T00:00:00Z",
+                                                  "url": "dup"}]}}]},
+                "timelineItems": {"nodes": []}}}}})
+        return json.dumps({"check_runs": []})
+
+    def test_seeded_counts_stored_ids_not_raw_items(self):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            result = _run(pr_watch.watch(repo=".", pr=5, heartbeat=False))
+        stored = next(iter(json.loads(self.state_path.read_text())["watches"].values()))
+        self.assertEqual(result["seeded"], len(stored["seen"]))
+        self.assertEqual(result["seeded"], 1)      # one distinct id...
+        self.assertEqual(result["items_seen"], 2)  # ...from two items
+
+
 if __name__ == "__main__":
     unittest.main()

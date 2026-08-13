@@ -53,6 +53,19 @@ STATE_PATH = Path(os.environ.get(
 EVENTS_PATH = Path(os.environ.get(
     "PR_WATCH_EVENTS", str(Path.home() / ".prime/agent/pr-watch/events.jsonl")))
 DEFAULT_QUIET_SECONDS = 180.0
+
+# Bumped whenever a watch ENTRY gains a field or an ownership rule changes.
+# Stamped into every entry at arm time and compared on every poll, because a
+# long-lived kernel that imported an older `pr_watch` keeps running it: an agent
+# re-armed a watch to pick up session fingerprints, the already-imported module
+# had no `_session_fingerprint`, so the entry was written with `session: None`
+# AND under a third ledger key - the agent believed it was covered and was not.
+# `importlib.reload(pr_watch)` fixes it, but a false belief in coverage has to be
+# DETECTED rather than documented, so poll() reports a mismatch in both
+# directions: older entries than this module mean re-arm them, newer entries than
+# this module mean THIS kernel is the stale one.
+ENTRY_VERSION = 3
+
 HEARTBEAT_LABEL = "pr-watch"
 HEARTBEAT_INSTRUCTION = (
     "pr-watch: run `print(await pr_watch.poll())`. If it reports READY items, "
@@ -372,11 +385,27 @@ async def _converge_keys() -> None:
     state = _load()
     moves: dict[str, str] = {}
     for key, entry in list(state.get("watches", {}).items()):
-        if "#" not in key or not key.startswith("/") or not entry.get("repo"):
+        # The test is "is the key's head a valid owner/name slug", NOT "does it
+        # look like a path". An earlier key format used the checkout's BASENAME
+        # (`fay-service-ret227#7292@...`), which is neither a slug nor an
+        # absolute path, so a startswith("/") guard skipped it and left a
+        # duplicate ledger for that PR alive - observed live, and it survived
+        # convergence with `session: None` next to the canonical fingerprinted
+        # entry, which is the worst of both worlds.
+        if "#" not in key or not entry.get("repo"):
             continue
+        if _SLUG_RE.match(key.split("#")[0]):
+            continue   # already canonical
         try:
-            slug = await _resolve_slug(entry["repo"])
+            # allow_ambient=False: this rewrites entries belonging to OTHER
+            # sessions, and an ambient GH_REPO would re-point their watch at this
+            # session's repo under their own owner id.
+            slug = await _resolve_slug(entry["repo"], allow_ambient=False)
         except PrWatchError:
+            # A deleted checkout (or one that can only be named by this
+            # process's environment) cannot be converged safely. Leave the entry
+            # exactly as it is: a stale key is recoverable, a dropped seen-set is
+            # not.
             continue
         moves[key] = _slug_key(slug, entry.get("pr"), entry.get("owner"))
     if not moves:
@@ -424,6 +453,15 @@ async def _migrated_key(repo: str, pr: Any, owner: Optional[str] = None) -> str:
 # every 30s for up to 6 hours and the answer cannot change for a given path.
 _SLUG_CACHE: dict[str, str] = {}
 
+# Paths whose slug came from the ambient `GH_REPO` rather than from the checkout
+# itself. Tracked separately because that provenance is only acceptable for gh
+# calls about the CALLER's own repo: `GH_REPO` names whatever the POLLING kernel
+# exports, so accepting it while rewriting somebody else's ledger entry would
+# re-point their watch at this session's repo - a webflow PR #399 silently
+# converged to `fayhealthinc/fay-service#399@<their owner>`, polled against the
+# wrong repository, in their name. Caught in review before it shipped.
+_AMBIENT_SLUG_PATHS: set[str] = set()
+
 # Only GitHub remotes are usable by gh, and this must be strict about it:
 # fay-service carries a `bitbucket` remote and a local `no-mistakes` remote
 # alongside `origin`, so "take the first remote" would silently point the
@@ -434,9 +472,22 @@ _GITHUB_URL_RE = re.compile(
 
 
 async def _run(binary: str, args: list[str], cwd: str) -> tuple[int, str, str]:
-    """Run a binary, returning (rc, stdout, stderr) with colour stripped."""
+    """Run a binary, returning (rc, stdout, stderr) with colour stripped.
+
+    Both preconditions are checked here rather than left to the OS, because this
+    function's contract is "returns a status, never raises": a missing binary and
+    a missing `cwd` both make `asyncio.create_subprocess_exec` throw
+    `FileNotFoundError`, which is an OSError and NOT a `PrWatchError`, so it flies
+    straight through every `except PrWatchError` in this module. That took the
+    whole fleet down on 2026-08-13: one watch pointed at a deleted checkout
+    (`/private/tmp/fay-webflow-custom-code`), and `poll()`'s pass over all 54
+    entries died on it before reading a single item - for every session at once,
+    with silence as the symptom.
+    """
     if shutil.which(binary) is None:
         return 127, "", f"binary not found on PATH: {binary}"
+    if not os.path.isdir(cwd):
+        return 127, "", f"cwd does not exist: {cwd}"
     proc = await asyncio.create_subprocess_exec(
         binary, *args, cwd=cwd, env={**os.environ, **_PLAIN_ENV},
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -451,16 +502,26 @@ def _parse_github_url(url: str) -> Optional[str]:
     return f"{match['owner']}/{match['name']}" if match else None
 
 
-async def _resolve_slug(repo: str) -> str:
+async def _resolve_slug(repo: str, allow_ambient: bool = True) -> str:
     """`owner/name` for the GitHub repo that `repo` (a path) belongs to.
 
     Works in a plain git checkout, in a colocated jj repo, and - the case this
     exists for - in a `jj workspace add` directory that has no `.git`. Raises
     loudly rather than returning None: a watcher that cannot name its repo must
     fail at arming time, not poll silently forever against nothing.
+
+    `allow_ambient=False` refuses the `GH_REPO` last resort, so the answer must
+    have come from the checkout itself. Pass it whenever the answer will be
+    written into a ledger entry this session does not own - see
+    `_AMBIENT_SLUG_PATHS`.
     """
     path = str(Path(repo).resolve())
     if path in _SLUG_CACHE:
+        if not allow_ambient and path in _AMBIENT_SLUG_PATHS:
+            raise PrWatchError(
+                f"refusing an ambient slug for {path!r}: it was resolved from "
+                f"this process's GH_REPO, not from the checkout, so it names "
+                f"this session's repo rather than that watch's.")
         return _SLUG_CACHE[path]
     tried: list[str] = []
     rc, out, err = await _run("git", ["-C", path, "remote", "get-url", "origin"], cwd=path)
@@ -488,6 +549,13 @@ async def _resolve_slug(repo: str) -> str:
     override = os.environ.get("GH_REPO", "").strip()
     if override:
         _SLUG_CACHE[path] = override
+        _AMBIENT_SLUG_PATHS.add(path)
+        if not allow_ambient:
+            raise PrWatchError(
+                f"cannot determine the GitHub repo for {path!r} from the "
+                f"checkout itself, and this caller refuses the ambient GH_REPO "
+                f"({override!r}) because the answer would be written into a "
+                f"watch entry that may belong to another session.")
         return override
     raise PrWatchError(
         f"cannot determine the GitHub repo for {path!r}, so gh has nothing to "
@@ -500,6 +568,15 @@ async def _resolve_slug(repo: str) -> str:
 async def _gh(args: list[str], repo: str, check: bool = True) -> str:
     if shutil.which(GH_BIN) is None:
         raise PrWatchError(f"binary not found on PATH: {GH_BIN}")
+    # Same landmine as `_run`: a deleted `cwd` makes create_subprocess_exec raise
+    # FileNotFoundError, which no caller's `except PrWatchError` would catch.
+    # Raise the module's own error type so a dead checkout degrades to "this one
+    # watch failed" instead of killing the poll for every other watch too.
+    if not os.path.isdir(repo):
+        raise PrWatchError(
+            f"cannot run gh for this watch: its checkout is gone ({repo!r}). "
+            f"The watch is left in place - `unwatch()` it deliberately if the "
+            f"repo is really finished with.")
     # GH_REPO is what makes this work from a jj workspace: gh no longer has to
     # infer the repo from a git remote in cwd, which there is not one of.
     env = {**os.environ, **_PLAIN_ENV, "GH_REPO": await _resolve_slug(repo)}
@@ -753,6 +830,13 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
     slug = await _resolve_slug(repo)
     key = await _migrated_key(repo, pr)
     items = await _activity(repo, pr) if seed else []
+    # DISTINCT ids, not len(items): several items can share one id (a comment
+    # that is also the first comment of a review thread carries the same url), so
+    # reporting len(items) as "seeded" overstated the seen-set by one or more -
+    # 11 reported against 10 stored, live - and made the resulting single
+    # re-report look like a notification bug rather than an off-by-one in the
+    # report. `seeded` now counts what was actually stored.
+    seeded_ids = {i["id"] for i in items if i.get("id")}
     with _locked():
         state = _load()
         existing = state["watches"].get(key, {})
@@ -763,15 +847,15 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
             # environment - the one moment when this session's identity is not
             # in doubt. See `_session_fingerprint`.
             "session": _session_fingerprint(),
+            "entry_version": ENTRY_VERSION,
             # Union with whatever a migrated path-keyed entry already had, so
             # re-watching from a different checkout does not replay the backlog.
-            "seen": sorted(set(existing.get("seen", []))
-                           | {i["id"] for i in items if i.get("id")}),
+            "seen": sorted(set(existing.get("seen", [])) | seeded_ids),
             "added_at": datetime.now(timezone.utc).isoformat(),
         }
         _save(state)
     hb = await _ensure_heartbeat(interval) if heartbeat else None
-    return {"watching": key, "seeded": len(items),
+    return {"watching": key, "seeded": len(seeded_ids), "items_seen": len(items),
             "quiet_seconds": quiet_seconds, "heartbeat": hb}
 
 
@@ -828,6 +912,8 @@ async def poll(mark_seen: bool = True, owner: Optional[str] = None) -> str:
     finished: list[str] = []
     guessed = 0   # entries claimed only on the strength of an ambiguous owner id
     wrote = False   # nothing is saved unless an entry was provably writable
+    older_entries = 0   # written by an older pr_watch than this one
+    newer_entries = 0   # written by a NEWER one, i.e. THIS kernel is stale
     for key, entry in list(state["watches"].items()):
         is_mine, proven = _entry_is_mine(entry, mine, my_session)
         if not is_mine:
@@ -839,6 +925,11 @@ async def poll(mark_seen: bool = True, owner: Optional[str] = None) -> str:
         may_write = mark_seen and (proven or not ambiguous)
         if not proven and ambiguous:
             guessed += 1
+        written_by = entry.get("entry_version", 0)
+        if written_by < ENTRY_VERSION:
+            older_entries += 1
+        elif written_by > ENTRY_VERSION:
+            newer_entries += 1
         try:
             items = await _activity(entry["repo"], entry["pr"])
         except PrWatchError as exc:
@@ -897,6 +988,24 @@ async def poll(mark_seen: bool = True, owner: Optional[str] = None) -> str:
                f"dropped for them. Re-arm them from this session, pass "
                f"owner=<id>, or export PR_WATCH_OWNER to poll authoritatively."]
               if guessed else [])
+    # Version skew is reported in BOTH directions, because the dangerous one is
+    # invisible from inside the stale kernel: an agent that re-armed a watch from
+    # a long-lived kernel running an older module wrote an entry with no
+    # fingerprint and a third ledger key, and believed it was covered.
+    if older_entries:
+        banner.append(
+            f"pr-watch: {older_entries} watch(es) were armed by an OLDER "
+            f"pr_watch (entry_version < {ENTRY_VERSION}). Re-arm them to pick up "
+            f"this version's ownership fields - and if you are re-arming from a "
+            f"long-lived kernel, `importlib.reload(pr_watch)` FIRST, or the "
+            f"already-imported old module writes the old shape again.")
+    if newer_entries:
+        banner.append(
+            f"pr-watch: {newer_entries} watch(es) were armed by a NEWER pr_watch "
+            f"than the one running here (entry_version > {ENTRY_VERSION}), so "
+            f"THIS kernel is the stale one. Run "
+            f"`import importlib; importlib.reload(pr_watch)` before trusting "
+            f"anything above, including this report.")
     if not state["watches"] and not ready_lines:
         return "\n".join(banner + ["pr-watch: nothing is being watched."])
     if not ready_lines:
@@ -936,7 +1045,13 @@ async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
         if not keys and ambiguous:
             _require_unambiguous_owner("ack every watch", owner)
     else:
-        keys = [await _migrated_key(repo, pr, owner if not ambiguous else None)]
+        try:
+            keys = [await _migrated_key(repo, pr, owner if not ambiguous else None)]
+        except PrWatchError:
+            # A deleted checkout cannot be converged to a slug key, but the entry
+            # still exists under its legacy key and must remain ackable - found by
+            # this module's own dead-checkout test.
+            keys = [_key(repo, pr, owner if not ambiguous else None)]
         target = state["watches"].get(keys[0])
         if target is not None and not _provably_mine(target):
             raise PrWatchError(
@@ -945,18 +1060,29 @@ async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
                 f"entry session {target.get('session')!r}). Acking it would "
                 f"silence another session's notifications.")
     current: dict[str, list] = {}
+    unreachable: list[str] = []
     for key in keys:
         entry = state["watches"].get(key)
-        if entry is not None:
-            current[key] = sorted({i["id"] for i in await _activity(entry["repo"], entry["pr"])
-                                   if i.get("id")})
+        if entry is None:
+            continue
+        try:
+            current[key] = sorted(
+                {i["id"] for i in await _activity(entry["repo"], entry["pr"])
+                 if i.get("id")})
+        except PrWatchError as exc:
+            # One unreachable watch (deleted checkout, gh hiccup) must not abort
+            # the ack of every other watch - the same abort-on-one-bad-entry shape
+            # that took down poll() for the whole fleet.
+            unreachable.append(f"{key} ({exc})")
     with _locked():
         state = _load()
         for key, ids in current.items():
             state["watches"].setdefault(key, {})["seen"] = ids
         _save(state)
     acked = len(current)
-    return f"pr-watch: acknowledged current activity on {acked} watch(es)."
+    note = (f" {len(unreachable)} watch(es) could not be reached and were left "
+            f"untouched: " + "; ".join(unreachable)) if unreachable else ""
+    return f"pr-watch: acknowledged current activity on {acked} watch(es).{note}"
 
 
 async def watching() -> str:
@@ -1011,11 +1137,30 @@ async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
         return (f"pr-watch: cleared {len(dropped)} watch(es) owned by {mine!r} "
                 f"and cancelled the heartbeat. Other sessions' watches were "
                 f"left alone.")
-    key = await _migrated_key(repo, pr)
+    # A dead checkout must remain REMOVABLE: `_migrated_key` needs a slug, which a
+    # deleted directory cannot supply, so fall back to the legacy path key. This is
+    # the one deliberate way to clear an entry whose repo is gone - the automatic
+    # paths all leave it alone, because dropping someone's seen-set is
+    # unrecoverable while a stale key is not.
+    try:
+        key = await _migrated_key(repo, pr)
+    except PrWatchError:
+        key = _key(repo, pr)
     state = _load()   # _migrated_key may have rewritten the file under us
-    state["watches"].pop(key, None)
+    removed = state["watches"].pop(key, None)
+    if removed is None:
+        # Also try the other form, so `unwatch` works whichever shape the entry
+        # happens to be in.
+        for other in [k for k in state["watches"]
+                      if k.endswith(f"#{pr}@{_owner()}")
+                      and (Path(state["watches"][k].get("repo", "")).resolve()
+                           == Path(repo).resolve())]:
+            removed = state["watches"].pop(other, None)
+            key = other
+            break
     _save(state)
-    return f"pr-watch: no longer watching {key}"
+    return (f"pr-watch: no longer watching {key}" if removed is not None
+            else f"pr-watch: no watch matched {key!r}; nothing removed")
 
 
 # ------------------------------------------------------- push (no polling
@@ -1093,6 +1238,7 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         fingerprint = session if session or owner else _session_fingerprint()
         if fingerprint:
             entry["session"] = fingerprint
+        entry["entry_version"] = ENTRY_VERSION
         entry["quiet_seconds"] = quiet_seconds
         if seeded is not None:
             entry["seen"] = seeded

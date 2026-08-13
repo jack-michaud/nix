@@ -210,6 +210,31 @@ sign, and eating a merge notification would defeat the point.
   the session - re-`watch()` in a new session to re-arm it.
 - `watch(seed=False)` hands you the PR's existing backlog on the first poll;
   the default seeds everything already there as seen.
+- **A dead checkout must not take down the fleet.** `poll()` converges keys
+  before reading anything, and convergence shells out with `cwd=<checkout>`. A
+  missing `cwd` (or a missing binary) makes `create_subprocess_exec` raise
+  `FileNotFoundError` - an OSError, NOT a `PrWatchError` - so it flew through
+  every `except PrWatchError` and `poll()` raised for **every session** off one
+  deleted directory. `_run` now returns `(127, "", "cwd does not exist: ...")`
+  and `_gh` raises `PrWatchError`, so a dead checkout degrades to "this one watch
+  failed". Its entry is left completely alone (never dropped, never re-keyed) -
+  a stale key is recoverable, someone else's deleted seen-set is not - and
+  `unwatch(repo=<dead path>, pr=N)` remains the deliberate way to remove it.
+- **Convergence never accepts an ambient `GH_REPO`.** `_resolve_slug` honours
+  `GH_REPO` as a last resort, which is fine for gh calls about your own repo and a
+  corruption vector when rewriting somebody else's ledger entry: an
+  existing-but-not-a-repo path would resolve to whatever the POLLING kernel
+  exports, silently re-pointing a stranger's webflow PR #399 at
+  `fayhealthinc/fay-service#399` under their owner id. `_converge_keys` passes
+  `allow_ambient=False`, and an entry it cannot name from the checkout itself is
+  left untouched.
+- **Stale-module detection.** A long-lived kernel keeps running the `pr_watch` it
+  imported hours ago, so re-arming a watch can silently write the OLD entry shape
+  and leave the agent believing it is covered. Every entry is stamped with
+  `entry_version`, and `poll()` reports skew in BOTH directions - older entries
+  mean re-arm them (after `importlib.reload(pr_watch)` if the kernel is
+  long-lived), newer entries mean THIS kernel is the stale one and its report
+  cannot be trusted.
 - **`repo=` may be a `jj workspace add` directory.** Such a directory has no
   `.git`, so `gh` cannot infer the repo from it; pr-watch resolves
   `owner/name` itself (git `origin`, else `jj git remote list`'s `origin`,
