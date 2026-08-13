@@ -1,6 +1,6 @@
 ---
 name: pr-watch
-description: Wake this agent when a watched GitHub PR receives comments, reviews, unresolved review threads, or a failing CI check-run, after a quiet debounce window (default 3 minutes) so a burst of activity produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Use after opening a PR that a human will review, or when asked to keep an eye on a PR and respond to feedback.
+description: Wake this agent when a watched GitHub PR receives comments, reviews, unresolved review threads, a failing CI check-run, or a lifecycle change (merged, closed unmerged, ready for review, converted to draft), after a quiet debounce window (default 3 minutes) so a burst of activity produces one wake-up instead of many. Watching is free while the PR is quiet - a sub-agent blocks in a single tool call and pushes the notification. Every observed transition is also appended to a durable JSONL event log, so a PR's lifecycle is reconstructible even if the watching session dies. Use after opening a PR that a human will review, when you need to know the moment a PR merges (e.g. to trigger evaluation on merge), or when asked to keep an eye on a PR and respond to feedback.
 compatibility: Requires an authenticated `gh` and runs inside the agent kernel (it spawns a sub-agent, or registers an RLM heartbeat).
 ---
 
@@ -134,13 +134,43 @@ await pr_watch.watch_via_child(repo="/path/to/repo", pr=2,
   than erroring - see `_check_run_failures` in pr_watch's source, which
   mirrors the check-run logic in the `jj-ship` skill's `checks()`.
 - **Several watchers on one machine are safe.** A watch is keyed
-  `<repo>#<pr>@<owner>`, where owner is the agent SESSION that owns it
+  `<owner/name>#<pr>@<owner-session>`, where the first part is the repo SLUG
+  (**not** the local checkout path - keying on the path made the same PR watched
+  from a jj workspace and from the canonical clone into two ledgers with
+  divergent seen-sets, which is how ~24h of review comments on fay-ui#3733 went
+  unseen; existing path-keyed entries are migrated, seen-sets unioned, not
+  dropped) and the second is the agent SESSION that owns it
   (`PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID`, or `PR_WATCH_OWNER`).
   Two sessions watching one PR keep independent seen-sets, so neither swallows
   the other's notification; `poll()`/`ack()` only touch the current session's
   watches. The watcher child inherits its PARENT's owner id - that is what lets
   a parent's `ack()` reach its own blocked child while staying isolated from
   other sessions. Writes take an `flock` and use per-pid temp files.
+## Merge/close detection and the event log
+
+`_activity()` also reads `state,isDraft,mergedAt,mergeCommit` from `gh pr view`
+(there is no `merged` field - it is `mergedAt`) and the PR's
+`ReadyForReviewEvent`/`ConvertToDraftEvent` timeline items, and emits four more
+item kinds through the same dedup/seen machinery: `merged` (carrying the merge
+commit sha), `closed_unmerged`, `ready_for_review`, `converted_to_draft`. They
+are never suppressed by `ignore_signatures` - a lifecycle item has no body to
+sign, and eating a merge notification would defeat the point.
+
+- **A terminal state ends the watch.** A merged or closed PR is reported
+  immediately (no debounce - nothing further can arrive) and then `serve()`
+  RETURNS a summary naming the terminal state, while `poll()` drops the watch.
+  Before this the module had no merge detection at all, so a watcher polled a
+  merged PR every 30s for the rest of its `max_hours` window and never mentioned
+  the merge. The returned summary is what a caller keys evaluation-on-merge off.
+- **Every newly observed transition is appended to `~/.prime/agent/pr-watch/events.jsonl`**
+  (override with `PR_WATCH_EVENTS`), one JSON object per line:
+  `{"at", "repo", "pr", "kind", "id", "author", "url"}`, `repo` being the slug.
+  A notification only exists inside the session that receives it - a worker
+  interruption on 2026-08-13 killed ten of eleven live watchers and took their
+  unreported activity with them - whereas an append-only log lets any later
+  process replay what happened. Logging is best-effort and swallows its own
+  errors: losing a log line must never kill a watch.
+
 - State is `~/.prime/agent/pr-watch/state.json` (override with `PR_WATCH_STATE`)
   and survives a kernel restart; the heartbeat is session-scoped, so it dies with
   the session - re-`watch()` in a new session to re-arm it.

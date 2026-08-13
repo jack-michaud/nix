@@ -9,8 +9,29 @@ Actions failures do not post PR comments on their own - a watcher that only
 looked at comments would sit there reporting "quiet" while CI was red, which
 is exactly what happened live before this was added.
 
+Merge/close detection rides the same stream (see `_lifecycle_items`): a
+watcher that only looked at comments would poll a merged PR for the rest of its
+`max_hours` window and never say the one thing the caller was waiting for.
+Observing a merge or an unmerged close ends the watch - a terminal PR cannot
+produce more review activity - and `serve()` returns a summary naming the
+terminal state so the caller can trigger downstream work (e.g. evaluation on
+merge) from it.
+
+Every newly observed transition is also appended to a durable JSONL event log
+(~/.prime/agent/pr-watch/events.jsonl, overridable with PR_WATCH_EVENTS).
+Notifications are only as durable as the session that owns them: on 2026-08-13
+a worker interruption killed ten of eleven live watchers, taking their
+unreported activity with them. An append-only log makes a PR's lifecycle
+reconstructible after the fact by anyone, which is what makes
+evaluation-on-merge deterministic instead of dependent on some session being
+awake at the moment GitHub flipped the bit. Logging is best-effort by
+construction: `_log_event` swallows its own failures, because losing a log line
+must never kill a watch.
+
 State lives in ~/.prime/agent/pr-watch/state.json so it survives a kernel
 restart; the heartbeat lives in the session, so it stops when the session ends.
+State (and the log) are keyed by the repo SLUG, not the local checkout path -
+see `_slug_key`.
 """
 
 from __future__ import annotations
@@ -29,6 +50,8 @@ from typing import Any, Optional, Sequence
 GH_BIN = os.environ.get("GH_BIN", "gh")
 STATE_PATH = Path(os.environ.get(
     "PR_WATCH_STATE", str(Path.home() / ".prime/agent/pr-watch/state.json")))
+EVENTS_PATH = Path(os.environ.get(
+    "PR_WATCH_EVENTS", str(Path.home() / ".prime/agent/pr-watch/events.jsonl")))
 DEFAULT_QUIET_SECONDS = 180.0
 HEARTBEAT_LABEL = "pr-watch"
 HEARTBEAT_INSTRUCTION = (
@@ -45,6 +68,58 @@ _PLAIN_ENV = {"NO_COLOR": "1", "CLICOLOR": "0", "GH_FORCE_TTY": "", "GH_PAGER": 
 
 class PrWatchError(RuntimeError):
     """A gh call failed, or the watchlist was used incorrectly."""
+
+
+# Item kinds that describe the PR itself rather than something somebody wrote.
+# They have no body to sign, so `ignore_signatures` must never apply to them
+# (see `_has_ignored_signature`): a merge that got filtered out as "one of my
+# own signed comments" is exactly the notification nobody would ever miss on
+# purpose.
+LIFECYCLE_KINDS = frozenset({
+    "merged", "closed_unmerged", "ready_for_review", "converted_to_draft"})
+
+# Kinds after which there is nothing left to watch: GitHub will not add review
+# activity to a merged or closed PR, so a watcher that keeps polling one is
+# burning its whole window on a dead PR.
+TERMINAL_KINDS = frozenset({"merged", "closed_unmerged"})
+
+
+# ----------------------------------------------------------- event log ----
+
+def _log_event(slug: str, pr: Any, item: dict) -> None:
+    """Append one observed transition to the durable JSONL event log.
+
+    Why a log at all, when the point of this module is notifications: a
+    notification only exists inside the session that receives it. When a
+    worker interruption killed ten of eleven live watchers on 2026-08-13,
+    everything they had seen died with them, and no later session could
+    reconstruct even whether a PR had merged. The log is append-only and
+    owner-agnostic, so any process - a different agent, a script, a human -
+    can replay a PR's lifecycle afterwards. That is what makes
+    evaluation-on-merge deterministic rather than contingent on someone being
+    awake when GitHub flipped the bit.
+
+    Atomic-ish on purpose: one `open(..., "a")` and exactly one `write` of a
+    single line, which POSIX keeps intact for concurrent appenders at this
+    size - hence no lock, so a watcher never blocks another to log. Every
+    failure is swallowed: a full disk, a read-only home, a bad path must not
+    take down a watch that is otherwise working.
+    """
+    try:
+        EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "repo": slug,
+            "pr": pr,
+            "kind": item.get("kind"),
+            "id": item.get("id"),
+            "author": item.get("author"),
+            "url": item.get("url"),
+        }, default=str) + "\n"
+        with open(EVENTS_PATH, "a") as handle:
+            handle.write(line)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- state ----
@@ -103,7 +178,86 @@ def _save(state: dict) -> None:
 
 
 def _key(repo: str, pr: Any, owner: Optional[str] = None) -> str:
+    """The LEGACY, path-keyed state key. Kept only so `_migrated_key` can find
+    and move entries written by older versions - never use it for new writes."""
     return f"{Path(repo).resolve()}#{pr}@{_owner(owner)}"
+
+
+def _slug_key(slug: str, pr: Any, owner: Optional[str] = None) -> str:
+    """The state key: repo SLUG, not local path.
+
+    Keying on the checkout path made the same PR watched from a `jj workspace
+    add` directory and from the canonical clone into two independent ledgers
+    with divergent seen-sets, so an item reported to one watcher stayed
+    unreported for the other - which is how ~24 hours of review comments on
+    fay-ui#3733 went unseen. The PR is the thing being watched, and the PR is
+    identified by owner/name#number, so that is what the key says.
+    """
+    return f"{slug}#{pr}@{_owner(owner)}"
+
+
+def _merge_entries(old: dict, new: dict) -> dict:
+    """Fold a legacy path-keyed entry into its slug-keyed successor.
+
+    Union of the seen-sets, deliberately: dropping the old one would replay
+    every comment on the PR as new, and dropping the new one would re-hide
+    whatever the slug-keyed watcher had already reported.
+    """
+    merged = {**old, **new}
+    merged["seen"] = sorted(set(old.get("seen", [])) | set(new.get("seen", [])))
+    return merged
+
+
+def _migrate_in_place(state: dict, legacy: str, key: str) -> bool:
+    if legacy == key or legacy not in state.get("watches", {}):
+        return False
+    watches = state["watches"]
+    watches[key] = _merge_entries(watches.pop(legacy), watches.get(key, {}))
+    return True
+
+
+async def _converge_keys() -> None:
+    """Move every legacy path-keyed entry onto its slug key.
+
+    Runs at the top of `poll()`, which is the one place that already walks the
+    whole file, so the migration converges for watches this session never
+    touches by name. An entry whose checkout has since been deleted cannot be
+    resolved to a slug; it is left as-is rather than dropped, since a stale key
+    is recoverable and a deleted seen-set is not.
+    """
+    state = _load()
+    moves: dict[str, str] = {}
+    for key, entry in list(state.get("watches", {}).items()):
+        if "#" not in key or not key.startswith("/") or not entry.get("repo"):
+            continue
+        try:
+            slug = await _resolve_slug(entry["repo"])
+        except PrWatchError:
+            continue
+        moves[key] = _slug_key(slug, entry.get("pr"), entry.get("owner"))
+    if not moves:
+        return
+    with _locked():
+        state = _load()
+        # A list, not any(): any() short-circuits and would skip later moves.
+        if [1 for legacy, key in moves.items() if _migrate_in_place(state, legacy, key)]:
+            _save(state)
+
+
+async def _migrated_key(repo: str, pr: Any, owner: Optional[str] = None) -> str:
+    """The slug-keyed key for this watch, migrating a path-keyed one if present.
+
+    Migration happens here rather than in `_load()` because `_load()` is sync
+    and the slug can only come from `gh`/`git`/`jj`; doing it lazily on every
+    read-modify-write path converges the file without ever dropping an entry.
+    """
+    key = _slug_key(await _resolve_slug(repo), pr, owner)
+    legacy = _key(repo, pr, owner)
+    with _locked():
+        state = _load()
+        if _migrate_in_place(state, legacy, key):
+            _save(state)
+    return key
 
 
 # --------------------------------------------------- repo identity (GH_REPO)
@@ -216,6 +370,13 @@ async def _gh(args: list[str], repo: str, check: bool = True) -> str:
     return out_s
 
 
+# One query for both review threads and the draft transitions, because they
+# come from the same PR object - a second `gh api graphql` round trip per poll
+# would double the cost of every poll for two fields. The draft transitions are
+# read as timeline EVENTS (each with its own node id) rather than derived from
+# the current `isDraft` boolean: a boolean gives no id to dedup on, so a PR
+# flipped to draft and back and to draft again would report at most one of
+# those transitions.
 _THREAD_QUERY = """
 query($owner:String!, $name:String!, $number:Int!) {
   repository(owner:$owner, name:$name) {
@@ -224,10 +385,19 @@ query($owner:String!, $name:String!, $number:Int!) {
         nodes { id isResolved path
           comments(last:20) { nodes { author { login } body createdAt url } } }
       }
+      timelineItems(last:20,
+                    itemTypes:[READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT]) {
+        nodes { __typename
+          ... on ReadyForReviewEvent { id createdAt actor { login } }
+          ... on ConvertToDraftEvent { id createdAt actor { login } } }
+      }
     }
   }
 }
 """
+
+_DRAFT_EVENT_KINDS = {"ReadyForReviewEvent": "ready_for_review",
+                      "ConvertToDraftEvent": "converted_to_draft"}
 
 
 def _ts(value: Optional[str]) -> float:
@@ -291,12 +461,43 @@ async def _check_run_failures(repo: str, owner: str, name: str,
     return failures
 
 
-async def _activity(repo: str, pr: Any) -> list[dict]:
-    """Every comment-ish or CI-failure event on a PR, newest last, as flat dicts with an id."""
-    raw = await _gh(["pr", "view", str(pr), "--json",
-                     "number,url,title,comments,reviews,headRefOid"], repo=repo)
-    view = json.loads(raw)
+def _lifecycle_items(view: dict) -> list[dict]:
+    """Merge / unmerged-close items derived from `gh pr view`'s own fields.
+
+    Field spellings are gh's, checked against `gh pr view --json` rather than
+    guessed: `state` is OPEN/CLOSED/MERGED, the merge timestamp is `mergedAt`
+    (there is no `merged` field), and `mergeCommit` is an object - `{"oid":
+    "<sha>"}` - or null while the PR is open.
+
+    The ids are stable and derived from the event, not from the poll, so the
+    same merge observed by ten polls (or ten watchers) dedups to one item.
+    """
     items: list[dict] = []
+    merged_at = view.get("mergedAt")
+    state = (view.get("state") or "").upper()
+    if merged_at:
+        sha = (view.get("mergeCommit") or {}).get("oid") or ""
+        items.append({
+            "kind": "merged", "id": f"merged:{sha or merged_at}",
+            "author": None,
+            "body": f"merged as {sha or 'an unreported commit'}",
+            "url": view.get("url"), "at": _ts(merged_at)})
+    elif state == "CLOSED":
+        items.append({
+            "kind": "closed_unmerged", "id": f"closed:{view.get('number')}",
+            "author": None, "body": "closed without merging",
+            "url": view.get("url"), "at": _ts(view.get("closedAt"))})
+    return items
+
+
+async def _activity(repo: str, pr: Any) -> list[dict]:
+    """Every comment-ish, CI-failure or lifecycle event on a PR, newest last,
+    as flat dicts with an id."""
+    raw = await _gh(["pr", "view", str(pr), "--json",
+                     "number,url,title,comments,reviews,headRefOid,"
+                     "state,isDraft,mergedAt,mergeCommit,closedAt"], repo=repo)
+    view = json.loads(raw)
+    items: list[dict] = _lifecycle_items(view)
     for c in view.get("comments", []):
         items.append({"kind": "comment", "id": c.get("url"),
                       "author": (c.get("author") or {}).get("login"),
@@ -320,10 +521,19 @@ async def _activity(repo: str, pr: Any) -> list[dict]:
                        "-f", f"query={_THREAD_QUERY}"], repo=repo, check=False)
     if graph:
         try:
-            nodes = (json.loads(graph)["data"]["repository"]["pullRequest"]
-                     ["reviewThreads"]["nodes"])
+            pull = json.loads(graph)["data"]["repository"]["pullRequest"]
         except (KeyError, TypeError, json.JSONDecodeError):
-            nodes = []
+            pull = {}
+        nodes = ((pull.get("reviewThreads") or {}).get("nodes") or [])
+        for event in ((pull.get("timelineItems") or {}).get("nodes") or []):
+            kind = _DRAFT_EVENT_KINDS.get(event.get("__typename"))
+            if not kind or not event.get("id"):
+                continue
+            items.append({
+                "kind": kind, "id": f"draft:{event['id']}",
+                "author": (event.get("actor") or {}).get("login"),
+                "body": kind.replace("_", " "),
+                "url": view.get("url"), "at": _ts(event.get("createdAt"))})
         for node in nodes:
             # A resolved thread needs no answer; an unresolved one does.
             if node.get("isResolved"):
@@ -364,6 +574,13 @@ def _has_ignored_signature(item: dict, ignore_signatures: Sequence[str]) -> bool
     """
     if not ignore_signatures:
         return False
+    # A lifecycle item (merged / closed / draft flip) is GitHub's own event, not
+    # something a persona wrote, so no signature list may suppress it. Belt and
+    # braces with the `or ""` below, which already keeps a None body from being
+    # read as a signature: a merge carries no body at all, and swallowing a
+    # merge notification would defeat the reason merge detection exists.
+    if item.get("kind") in LIFECYCLE_KINDS:
+        return False
     body = item.get("body") or ""
     lines = [line for line in body.splitlines() if line.strip()]
     if not lines:
@@ -389,19 +606,24 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
     # Resolve up front, even when seed=False skips the first _activity() call:
     # an unresolvable repo must blow up HERE, at arming time, while someone is
     # looking at the result - not later inside a poll loop that swallows errors.
-    await _resolve_slug(repo)
+    slug = await _resolve_slug(repo)
+    key = await _migrated_key(repo, pr)
     items = await _activity(repo, pr) if seed else []
     with _locked():
         state = _load()
-        state["watches"][_key(repo, pr)] = {
-            "repo": repo, "pr": pr, "quiet_seconds": quiet_seconds,
+        existing = state["watches"].get(key, {})
+        state["watches"][key] = {
+            "repo": repo, "slug": slug, "pr": pr, "quiet_seconds": quiet_seconds,
             "owner": _owner(),
-            "seen": [i["id"] for i in items if i.get("id")],
+            # Union with whatever a migrated path-keyed entry already had, so
+            # re-watching from a different checkout does not replay the backlog.
+            "seen": sorted(set(existing.get("seen", []))
+                           | {i["id"] for i in items if i.get("id")}),
             "added_at": datetime.now(timezone.utc).isoformat(),
         }
         _save(state)
     hb = await _ensure_heartbeat(interval) if heartbeat else None
-    return {"watching": _key(repo, pr), "seeded": len(items),
+    return {"watching": key, "seeded": len(items),
             "quiet_seconds": quiet_seconds, "heartbeat": hb}
 
 
@@ -424,12 +646,18 @@ async def poll(mark_seen: bool = True) -> str:
 
     New activity is held until nothing newer has arrived for `quiet_seconds`
     (default 180), so one burst of review comments produces one wake-up.
+
+    A merge or an unmerged close is reported IMMEDIATELY (no debounce - nothing
+    further can arrive on a terminal PR) and the watch is then dropped, so the
+    heartbeat stops paying for polls of a dead PR.
     """
+    await _converge_keys()
     state = _load()
     mine = _owner()
     now = datetime.now(timezone.utc).timestamp()
     ready_lines: list[str] = []
     holding: list[str] = []
+    finished: list[str] = []
     for key, entry in list(state["watches"].items()):
         if entry.get("owner", mine) != mine:
             continue   # another session's watcher reports to its own agent
@@ -438,29 +666,43 @@ async def poll(mark_seen: bool = True) -> str:
         except PrWatchError as exc:
             holding.append(f"{key}: poll failed ({exc})")
             continue
+        slug = entry.get("slug") or key.split("#")[0]
         seen = set(entry.get("seen", []))
         fresh = [i for i in items if i.get("id") and i["id"] not in seen]
-        if not fresh:
-            continue
-        newest = max(i["at"] for i in fresh)
-        quiet_for = now - newest
-        window = float(entry.get("quiet_seconds", DEFAULT_QUIET_SECONDS))
-        if quiet_for < window:
-            holding.append(
-                f"{key}: {len(fresh)} new item(s), still settling "
-                f"({int(window - quiet_for)}s of quiet left)")
-            continue
-        ready_lines.append(f"READY {key} - {len(fresh)} new item(s):")
         for i in fresh:
-            where = f" [{i.get('path')}]" if i.get("path") else ""
-            ready_lines.append(
-                f"  - {i['kind']}{where} by {i.get('author')}: "
-                f"{(i.get('body') or '').strip()}\n    {i.get('url')}")
+            _log_event(slug, entry.get("pr"), i)
+        terminal = next((i for i in items if i["kind"] in TERMINAL_KINDS), None)
+        if not fresh and not terminal:
+            continue
+        window = float(entry.get("quiet_seconds", DEFAULT_QUIET_SECONDS))
+        if fresh and terminal is None:
+            newest = max(i["at"] for i in fresh)
+            quiet_for = now - newest
+            if quiet_for < window:
+                holding.append(
+                    f"{key}: {len(fresh)} new item(s), still settling "
+                    f"({int(window - quiet_for)}s of quiet left)")
+                continue
+        if fresh:
+            ready_lines.append(f"READY {key} - {len(fresh)} new item(s):")
+            for i in fresh:
+                where = f" [{i.get('path')}]" if i.get("path") else ""
+                ready_lines.append(
+                    f"  - {i['kind']}{where} by {i.get('author')}: "
+                    f"{(i.get('body') or '').strip()}\n    {i.get('url')}")
+        if terminal is not None:
+            # Drop the watch, not just mark it seen: the PR is terminal, so
+            # every future poll would cost a gh round trip to learn nothing.
+            finished.append(f"{key}: {terminal['kind']} - no longer watching "
+                            f"({terminal.get('body')})")
+            state["watches"].pop(key, None)
+            continue
         if mark_seen:
             entry["seen"] = sorted(seen | {i["id"] for i in fresh})
-    if mark_seen:
+    if mark_seen or finished:
         _save(state)
-    if not state["watches"]:
+    ready_lines.extend(finished)
+    if not state["watches"] and not ready_lines:
         return "pr-watch: nothing is being watched."
     if not ready_lines:
         return "pr-watch: nothing ready." + ("\n  " + "\n  ".join(holding) if holding else "")
@@ -479,7 +721,7 @@ async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False) -> s
     # Only this session's own watches: acking another session's watcher would
     # silence a notification its own agent never saw.
     keys = [k for k, v in state["watches"].items() if v.get("owner", mine) == mine] \
-        if all else [_key(str(Path(repo).resolve()), pr)]
+        if all else [await _migrated_key(repo, pr)]
     current: dict[str, list] = {}
     for key in keys:
         entry = state["watches"].get(key)
@@ -521,7 +763,8 @@ async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False) 
         except Exception as exc:  # heartbeat teardown must not lose the state write
             return f"pr-watch: cleared watchlist; heartbeat cleanup failed: {exc}"
         return "pr-watch: cleared watchlist and cancelled the heartbeat."
-    key = _key(str(Path(repo).resolve()), pr)
+    key = await _migrated_key(repo, pr)
+    state = _load()   # _migrated_key may have rewritten the file under us
     state["watches"].pop(key, None)
     _save(state)
     return f"pr-watch: no longer watching {key}"
@@ -546,7 +789,13 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
 
     Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
     this one tool call, so idle polling consumes no model tokens. Returns when
-    `max_hours` elapses so the caller can re-arm.
+    `max_hours` elapses so the caller can re-arm, OR as soon as the PR reaches a
+    terminal state (merged / closed unmerged), in which case the returned string
+    names that state and says not to re-arm - a merged PR cannot produce more
+    review activity, and watchers used to spend their entire window polling one.
+
+    Every newly observed item is also appended to the JSONL event log (see
+    `_log_event`), so the PR's lifecycle survives this session's death.
 
     `notify_role`/`notify_name` default to messaging this watcher's own
     PARENT, which is correct for a `watch_via_child()`-spawned watcher (the
@@ -570,13 +819,18 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     # Same reason as watch(): fail loudly before entering a loop whose
     # per-poll error handling is (deliberately) silent, so a watcher can never
     # again report as armed while being incapable of polling at all.
-    await _resolve_slug(repo)
-    key = _key(repo, pr, owner)
+    slug = await _resolve_slug(repo)
+    # Slug-keyed, and migrating a path-keyed predecessor if one exists, so a
+    # watcher armed from a jj workspace shares one seen-set with the same PR
+    # watched from the canonical clone (see _slug_key).
+    key = await _migrated_key(repo, pr, owner)
     seeded = sorted({i["id"] for i in await _activity(repo, pr) if i.get("id")}) if seed else None
     with _locked():
         state = _load()
-        entry = state["watches"].setdefault(key, {"repo": repo, "pr": pr,
-                                                  "owner": _owner(owner)})
+        entry = state["watches"].setdefault(key, {"repo": repo, "slug": slug,
+                                                 "pr": pr,
+                                                 "owner": _owner(owner)})
+        entry["slug"] = slug
         entry["quiet_seconds"] = quiet_seconds
         if seeded is not None:
             entry["seen"] = seeded
@@ -590,13 +844,25 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
     def _mark(ids: set) -> None:
         with _locked():
             st = _load()
-            e = st["watches"].setdefault(key, {"repo": repo, "pr": pr,
+            e = st["watches"].setdefault(key, {"repo": repo, "slug": slug,
+                                              "pr": pr,
                                               "owner": _owner(owner), "seen": []})
             e["seen"] = sorted(set(e.get("seen", [])) | ids)
             _save(st)
     deadline = time.time() + max_hours * 3600.0
     sent = errors = 0
     pending: dict[str, dict] = {}
+
+    def _finished(terminal: dict, reported: bool) -> str:
+        # `reported` distinguishes "this call announced the terminal state" from
+        # "it was already in the seen-set when we got here" (e.g. seed=True on an
+        # already-merged PR). Both stop the watch; only one of them notified.
+        return (f"pr-watch serve finished: {slug}#{pr} is {terminal['kind']} "
+                f"({terminal.get('body')}); {sent} notification(s), "
+                f"{errors} poll error(s). "
+                f"{'Reported in the final message' if reported else 'Already seen when this watch started, nothing reported'}"
+                f" - terminal state, do NOT re-arm.")
+
     while time.time() < deadline:
         await asyncio.sleep(poll_seconds)
         try:
@@ -605,6 +871,18 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
             errors += 1
             continue
         seen = _seen_now()
+        for i in items:
+            if i.get("id") and i["id"] not in seen and i["id"] not in pending:
+                # Log at first observation, before any filtering: the log is a
+                # record of what happened on the PR, not of what this watcher
+                # chose to report, so a signature-suppressed comment belongs in
+                # it too.
+                _log_event(slug, pr, i)
+        # A merged or closed PR is the end of the watch. Bypass the debounce
+        # window for it - the window exists to let a burst of typing settle, and
+        # nothing more can arrive on a terminal PR - and report whatever else is
+        # pending in the same, final message.
+        terminal = next((i for i in items if i["kind"] in TERMINAL_KINDS), None)
         ignored: set = set()
         for i in items:
             if i.get("id") and i["id"] not in seen:
@@ -618,12 +896,21 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         for gone in [k for k in pending if k in seen]:   # acked while pending
             pending.pop(gone)
         if not pending:
+            # Terminal but already seen: e.g. seed=True on a PR that had
+            # already merged. Nothing to notify, but there is also nothing left
+            # to watch, so stop instead of burning the whole max_hours window.
+            if terminal is not None:
+                return _finished(terminal, reported=False)
             continue
-        newest = max(i["at"] for i in pending.values())
-        if time.time() - newest < quiet_seconds:
-            continue  # still arriving - hold the whole burst
-        lines = [f"pr-watch: {len(pending)} new item(s) on {repo}#{pr} "
-                 f"(quiet for {int(quiet_seconds)}s):"]
+        if terminal is None:
+            newest = max(i["at"] for i in pending.values())
+            if time.time() - newest < quiet_seconds:
+                continue  # still arriving - hold the whole burst
+        header = (f"pr-watch: {len(pending)} new item(s) on {slug}#{pr} "
+                  + (f"(TERMINAL: {terminal['kind']}, reported immediately):"
+                     if terminal is not None
+                     else f"(quiet for {int(quiet_seconds)}s):"))
+        lines = [header]
         for i in sorted(pending.values(), key=lambda x: x["at"]):
             where = f" [{i.get('path')}]" if i.get("path") else ""
             lines.append(f"  - {i['kind']}{where} by {i.get('author')}: "
@@ -638,6 +925,8 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
         sent += 1
         _mark(set(pending))
         pending.clear()
+        if terminal is not None:
+            return _finished(terminal, reported=True)
     return (f"pr-watch serve finished after {max_hours}h: "
             f"{sent} notification(s), {errors} poll error(s). Re-arm to keep watching.")
 
