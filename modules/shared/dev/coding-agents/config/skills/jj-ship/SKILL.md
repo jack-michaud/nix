@@ -17,8 +17,19 @@ landing authority.
 await jj_ship.status(repo=REPO)                       # what is in @, which bookmarks
 await jj_ship.commit("Fix the widget", repo=REPO, bookmark="fix-widget")
 await jj_ship.push(repo=REPO, bookmark="fix-widget")
-await jj_ship.open_pr("Fix the widget", body=BODY, repo=REPO)
+await jj_ship.open_pr("Fix the widget", body=BODY, repo=REPO, draft=True)
 await jj_ship.watch(repo=REPO, interval=20, max_polls=30)   # CI + new comments
+```
+
+**A non-draft PR needs attestations** (see "Attestations" below); a draft needs
+none, so the loop above drafts first and asks for review afterwards:
+
+```python
+tokens = [await attest.design_reviewed(repo=REPO, base="main", head="fix-widget",
+                                       design_doc_id="ENG-123", quote="...",
+                                       requirements=[("...", "src/widget.py:12")]),
+          await attest.eval_passed(repo=REPO, base="main", head="fix-widget")]
+await jj_ship.mark_ready(repo=REPO, attestations=tokens)
 ```
 
 **Before opening a PR, run your body through `normalize_markdown_body()`** if you
@@ -66,12 +77,51 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
   `JjShipError` naming the offending line pairs instead of auto-fixing and
   submitting - call `normalize_markdown_body()` and retry. `skip_wrap_check=True`
   is an explicit, rarely-needed opt-in past this check, not a default.
+- `open_pr()` and `mark_ready()` **require attestations for a non-draft PR** -
+  see "Attestations".
 - `checks()` state is `passing | failing | pending | none`; a repo with no configured checks
   reports `none`, not an error.
 - `comments()` returns issue comments, review bodies, and **unresolved review threads**
   (`isResolved` only exists in the GraphQL API, so it uses `gh api graphql`).
 - `watch()` polls until checks settle, printing each poll and any comment that appeared after
   the first poll. It returns `{checks, comments, polls, settled, new_activity}`.
+
+## Attestations
+
+Creating a **non-draft** PR, or `mark_ready()`-ing a draft, requires one signed
+token per claim in `attest.REQUIRED_CLAIMS` - `design_reviewed` **and**
+`eval_passed` - produced by the `attest` skill. Drafting requires none, on
+purpose: a draft is where work-in-progress belongs, and friction there only
+teaches agents to skip drafts.
+
+Verification **recomputes the diff hash from the tree jj is about to push**
+(`base...head`, base defaulting to the repo's default branch) and compares it to
+the hash inside each token. So:
+
+- a token issued before your last edit is refused with `attestation is bound to
+  a different diff - re-run the verification after your last edit`, printing both
+  hashes;
+- a missing claim is refused by name, telling you which `attest.<claim>(...)` to
+  run.
+
+On success the body gains a trailer:
+
+```text
+Shipped-With: jj_ship/0.2.0 attest=1a2b3c4d5e6f,0f9e8d7c6b5a
+```
+
+Those are token IDs (`sha256(token)[:12]`), never the tokens themselves - a token
+is a bearer credential. The trailer's purpose is detection: a PR opened outside
+this path has none, which is visible from GitHub alone. `mark_ready()` appends it
+to the existing body at ready time rather than at draft time, because a draft's
+diff is expected to keep moving and a trailer naming a stale token is worse than
+no trailer.
+
+`ship()` takes `attestations=` **keyword-only, defaulting to None**, so every
+existing call site keeps working and only the non-draft path raises. Read
+`attest`'s SKILL.md before assuming what this buys: it is tamper-evident, not
+tamper-proof, and the load-bearing part is the verification work, not the
+signature.
 
 ## Stacked PRs
 

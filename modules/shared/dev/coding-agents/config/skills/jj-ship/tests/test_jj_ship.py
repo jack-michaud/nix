@@ -11,7 +11,12 @@ binary required (the `_gh`/`_jj` calls are monkeypatched where needed).
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -165,8 +170,11 @@ class OpenPrWrapEnforcementTest(unittest.TestCase):
         with patch.object(jj_ship, "_gh", new=AsyncMock(side_effect=_fake_gh)), \
              patch.object(jj_ship, "current_bookmark", new=AsyncMock(return_value="my-branch")), \
              patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
+            # draft=True because this test is about the wrap check, which runs
+            # before (and independently of) the attestation gate.
             result = _run(jj_ship.open_pr(
-                "Title", body=BAD_7207_B, repo=".", skip_wrap_check=True))
+                "Title", body=BAD_7207_B, repo=".", skip_wrap_check=True,
+                draft=True))
         self.assertTrue(result["created"])
 
     def test_clean_body_passes_straight_through(self):
@@ -181,7 +189,8 @@ class OpenPrWrapEnforcementTest(unittest.TestCase):
         with patch.object(jj_ship, "_gh", new=AsyncMock(side_effect=_fake_gh)), \
              patch.object(jj_ship, "current_bookmark", new=AsyncMock(return_value="my-branch")), \
              patch.object(jj_ship, "_default_branch", new=AsyncMock(return_value="main")):
-            result = _run(jj_ship.open_pr("Title", body=CLEAN_BODY, repo="."))
+            result = _run(jj_ship.open_pr("Title", body=CLEAN_BODY, repo=".",
+                                          draft=True))
         self.assertTrue(result["created"])
 
 
@@ -328,6 +337,200 @@ class BookmarkNameHasNoSyncMarkerTest(unittest.TestCase):
 
         with patch.object(jj_ship, "status", new=AsyncMock(side_effect=_fake_status)):
             self.assertEqual(_run(jj_ship.current_bookmark(repo=".")), "my-branch")
+
+
+# ---------------------------------------------------------------------------
+# attestation enforcement
+# ---------------------------------------------------------------------------
+# These tests use a real git repository and a real fake `gh` on PATH (via
+# GH_BIN) rather than patching jj_ship's internals. Two reasons: the whole
+# attestation path is about what actually reaches `gh pr create`, which a
+# patched `_gh` cannot show; and attest.eval_passed() - the gate these very
+# changes install - counts `mock.patch(`/`MagicMock` as violations, so a suite
+# that cannot be written without them could never ship through its own gate.
+
+ATTEST_SRC = Path(__file__).resolve().parents[2] / "attest" / "src"
+sys.path.insert(0, str(ATTEST_SRC))
+
+import attest  # noqa: E402
+
+# A `gh` that records every invocation and answers the handful of subcommands
+# the shipping path uses. Written to disk and pointed at with GH_BIN.
+FAKE_GH = r"""#!/usr/bin/env python3
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_GH_LOG"], "a") as fh:
+    fh.write(json.dumps(argv) + "\n")
+if argv[:2] == ["repo", "view"]:
+    print("main")
+elif argv[:2] == ["pr", "list"]:
+    print("[]")
+elif argv[:2] == ["pr", "create"]:
+    print("https://github.com/o/r/pull/1")
+elif argv[:2] == ["pr", "view"]:
+    print(json.dumps({"number": 1, "url": "https://github.com/o/r/pull/1",
+                      "body": "**Original body.**", "headRefName": "feature",
+                      "baseRefName": "main", "isDraft": True}))
+elif argv[:2] in (["pr", "edit"], ["pr", "ready"]):
+    pass
+else:
+    sys.stderr.write("unexpected: %r\n" % (argv,))
+    sys.exit(9)
+"""
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                          capture_output=True, text=True).stdout
+
+
+class AttestationEnforcementTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+        self.repo = tmp / "repo"
+        self.repo.mkdir()
+        _git(tmp, "init", "-q", "-b", "main", str(self.repo))
+        _git(self.repo, "config", "user.email", "t@example.com")
+        _git(self.repo, "config", "user.name", "Test")
+        _git(self.repo, "remote", "add", "origin", "git@github.com:o/r.git")
+        (self.repo / "README.md").write_text("start\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "initial")
+        _git(self.repo, "checkout", "-q", "-b", "feature")
+        (self.repo / "app.py").write_text("value = 1\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "feature")
+
+        gh = tmp / "gh"
+        gh.write_text(FAKE_GH)
+        gh.chmod(0o755)
+        self.gh_log = tmp / "gh.log"
+
+        self._saved = {k: os.environ.get(k) for k in
+                       ("ATTEST_HOME", "FAKE_GH_LOG", "GH_REPO")}
+        self.addCleanup(self._restore)
+        os.environ["ATTEST_HOME"] = str(tmp / "state")
+        os.environ["FAKE_GH_LOG"] = str(self.gh_log)
+        os.environ.pop("GH_REPO", None)
+        self._saved_gh_bin = jj_ship.GH_BIN
+        jj_ship.GH_BIN = str(gh)
+        jj_ship._SLUG_CACHE.clear()
+
+    def _restore(self):
+        jj_ship.GH_BIN = self._saved_gh_bin
+        for key, value in self._saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def gh_calls(self):
+        if not self.gh_log.exists():
+            return []
+        return [json.loads(line) for line in
+                self.gh_log.read_text().strip().split("\n") if line]
+
+    def created_body(self):
+        for argv in self.gh_calls():
+            if argv[:2] == ["pr", "create"]:
+                return argv[argv.index("--body") + 1]
+        raise AssertionError(f"no `pr create` in {self.gh_calls()!r}")
+
+    def tokens(self):
+        """Both required claims, signed against the current diff.
+
+        Signed directly rather than through design_reviewed(): that function's
+        Linear fetch and quote/path matching are covered by the attest suite,
+        while what jj-ship owns is refusing a PR whose tokens do not match.
+        """
+        sha = _run(attest.diff_sha(str(self.repo), "main", "feature"))
+        return [
+            str(attest._issue("design_reviewed", sha, str(self.repo), "main",
+                              "feature", "ENG-1", "q" * 64, 1, {})),
+            str(_run(attest.eval_passed(str(self.repo), "main", "feature"))),
+        ]
+
+    # -- refusals ---------------------------------------------------------
+
+    def test_a_non_draft_pr_without_attestations_names_every_missing_claim(self):
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+                                 head="feature"))
+        message = str(ctx.exception)
+        self.assertIn("missing attestation(s)", message)
+        self.assertIn("design_reviewed", message)
+        self.assertIn("eval_passed", message)
+        self.assertNotIn(["pr", "create"], [c[:2] for c in self.gh_calls()])
+
+    def test_one_claim_short_names_only_the_missing_one(self):
+        both = self.tokens()
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+                                 head="feature", attestations=[both[1]]))
+        self.assertIn("design_reviewed", str(ctx.exception))
+
+    def test_an_edit_after_attestation_voids_the_token(self):
+        tokens = self.tokens()
+        (self.repo / "app.py").write_text("value = 2\n")
+        _git(self.repo, "commit", "-aqm", "one more edit")
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+                                 head="feature", attestations=tokens))
+        message = str(ctx.exception)
+        self.assertIn("attestation is bound to a different diff - re-run the "
+                      "verification after your last edit", message)
+        self.assertNotIn(["pr", "create"], [c[:2] for c in self.gh_calls()])
+
+    # -- what is allowed --------------------------------------------------
+
+    def test_a_draft_needs_no_attestation(self):
+        result = _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+                                      head="feature", draft=True))
+        self.assertTrue(result["created"])
+        create = next(c for c in self.gh_calls() if c[:2] == ["pr", "create"])
+        self.assertIn("--draft", create)
+        # ...and stays clean of a trailer naming tokens that do not exist.
+        self.assertNotIn("Shipped-With:", self.created_body())
+
+    def test_valid_attestations_open_the_pr_and_stamp_the_trailer(self):
+        tokens = self.tokens()
+        result = _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+                                      head="feature", attestations=tokens))
+        self.assertTrue(result["created"])
+        body = self.created_body()
+        expected = jj_ship.attestation_trailer([attest.token_id(t) for t in tokens])
+        self.assertIn(expected, body)
+        self.assertIn(f"jj_ship/{jj_ship.VERSION}", body)
+        # The trailer carries IDs, never the bearer tokens themselves.
+        for token in tokens:
+            self.assertNotIn(token, body)
+
+    def test_mark_ready_refuses_without_attestations_and_accepts_with_them(self):
+        tokens = self.tokens()
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.mark_ready(1, repo=str(self.repo)))
+        self.assertIn("missing attestation(s)", str(ctx.exception))
+        self.assertNotIn(["pr", "ready"], [c[:2] for c in self.gh_calls()])
+
+        result = _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=tokens))
+        self.assertTrue(result["ready"])
+        self.assertIn(["pr", "ready"], [c[:2] for c in self.gh_calls()])
+        edit = next(c for c in self.gh_calls() if c[:2] == ["pr", "edit"])
+        edited_body = edit[edit.index("--body") + 1]
+        self.assertIn("**Original body.**", edited_body)
+        self.assertIn("Shipped-With:", edited_body)
+
+    def test_ship_keeps_its_old_signature_and_takes_attestations_by_keyword(self):
+        signature = inspect.signature(jj_ship.ship)
+        parameter = signature.parameters["attestations"]
+        self.assertEqual(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIsNone(parameter.default)
+        positional = [name for name, p in signature.parameters.items()
+                      if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD]
+        self.assertEqual(positional[:4], ["message", "bookmark", "title", "body"])
 
 
 if __name__ == "__main__":
