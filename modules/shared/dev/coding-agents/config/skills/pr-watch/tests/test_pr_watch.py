@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -66,8 +67,15 @@ class IsolatedPaths:
         tmp = Path(tmpdir.name)
         self.state_path = tmp / "state.json"
         self.events_path = tmp / "events.jsonl"
+        # Owner identity is pinned too, so provenance does not depend on which
+        # kernel runs the suite: inside a sub-agent the ambient daemon session id
+        # is `inherited` and poll() correctly degrades to read-only, which would
+        # make ownership-independent tests fail in a child and pass at top level.
+        # Tests that exercise the ambiguous path opt in via `as_session()`.
         env = patch.dict(os.environ, {"PR_WATCH_STATE": str(self.state_path),
-                                      "PR_WATCH_EVENTS": str(self.events_path)})
+                                      "PR_WATCH_EVENTS": str(self.events_path),
+                                      "PR_WATCH_OWNER": "test-owner",
+                                      "PR_WATCH_SESSION": "test-session"})
         env.start()
         self.addCleanup(env.stop)
         for attr, value in (("STATE_PATH", self.state_path),
@@ -75,6 +83,27 @@ class IsolatedPaths:
             patcher = patch.object(pr_watch, attr, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    @staticmethod
+    @contextmanager
+    def as_session(*, owner_env=None, session_dir=None, daemon=None,
+                   session_env=None):
+        """Impersonate a session's ENVIRONMENT, the way the daemon sets it up.
+
+        The whole bug class lives in these four variables, so tests have to be
+        able to set them exactly - including ABSENT, which `patch.dict` cannot
+        express on its own.
+        """
+        wanted = {"PR_WATCH_OWNER": owner_env, "PR_WATCH_SESSION": session_env,
+                  "RLM_SESSION_DIR": session_dir,
+                  "PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID": daemon}
+        with patch.dict(os.environ, {}, clear=False):
+            for name, value in wanted.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            yield
 
     def logged_events(self) -> list[dict]:
         if not self.events_path.exists():
@@ -802,28 +831,265 @@ class PollTerminalDropsTheWatchTest(IsolatedPaths, unittest.TestCase):
             return json.dumps({"check_runs": []})
         raise AssertionError(f"unexpected gh call: {args}")
 
+    def _seed(self, **extra):
+        key = f"o/r#7304@{pr_watch._owner()}"
+        entry = {"repo": ".", "slug": "o/r", "pr": 7304,
+                 "owner": pr_watch._owner(), "seen": [], "quiet_seconds": 999}
+        entry.update(extra)
+        self.state_path.write_text(json.dumps({"watches": {key: entry}}))
+        return key
+
+    def _poll_twice(self):
+        with patch.object(pr_watch, "_gh", new=AsyncMock(side_effect=self._fake_gh)), \
+                patch.object(pr_watch, "_resolve_slug",
+                             new=AsyncMock(return_value="o/r")):
+            first = _run(pr_watch.poll())
+            second = _run(pr_watch.poll())
+        return first, second, json.loads(self.state_path.read_text())["watches"]
+
     def test_merged_pr_is_reported_then_unwatched(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            key = "o/r#7304@" + pr_watch._owner()
-            state_path.write_text(json.dumps({"watches": {key: {
-                "repo": ".", "slug": "o/r", "pr": 7304,
-                "owner": pr_watch._owner(), "seen": [], "quiet_seconds": 999}}}))
-            with patch.object(pr_watch, "_gh",
-                              new=AsyncMock(side_effect=self._fake_gh)), \
-                    patch.object(pr_watch, "STATE_PATH", state_path), \
-                    patch.object(pr_watch, "EVENTS_PATH", Path(tmp) / "events.jsonl"), \
-                    patch.object(pr_watch, "_resolve_slug",
-                                 new=AsyncMock(return_value="o/r")):
-                first = _run(pr_watch.poll())
-                second = _run(pr_watch.poll())
-            watches = json.loads(state_path.read_text())["watches"]
+        self._seed(session="test-session")
+        first, second, watches = self._poll_twice()
         self.assertIn("merged", first)
         self.assertIn("no longer watching", first)
         self.assertEqual(watches, {})
         # And it does not keep re-reporting: the watch is gone.
         self.assertIn("nothing is being watched", second)
+
+    def test_an_unprovable_entry_is_reported_but_left_in_place(self):
+        # No arm-time fingerprint on the entry AND an inherited owner id: the
+        # exact shape of the 57 legacy entries found on this machine. Reported,
+        # never consumed.
+        with self.as_session(session_dir="/x/sub-deadbeef", daemon="ancestor-id"):
+            self._seed(owner="ancestor-id")
+            first, second, watches = self._poll_twice()
+        self.assertIn("READ-ONLY", first)
+        self.assertIn("left in place", first)
+        self.assertEqual(len(watches), 1)              # not dropped
+        self.assertEqual(watches["o/r#7304@ancestor-id"]["seen"], [])   # not drained
+        self.assertIn("READ-ONLY", second)             # and it keeps reporting
+
+
+class CrossSessionDrainTest(IsolatedPaths, unittest.TestCase):
+    """The 2026-08-13 ledger bug, both directions.
+
+    `_owner()`'s fallback is `PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID`,
+    which the daemon exports and a spawned sub-agent INHERITS - so inside a child
+    it names an ancestor. Session A and session B therefore resolve to the SAME
+    owner id, and `poll(mark_seen=True)` (the default) writes
+    `entry["seen"] |= fresh`. Whichever polls first drains the other's queue
+    permanently: those ids never appear as `fresh` again, and on the victim's side
+    the symptom is silence, indistinguishable from a quiet PR.
+
+    Re-deriving the owner at poll time cannot fix this - the two sessions are the
+    same string by construction - so ownership is settled by the fingerprint
+    captured at ARM time.
+    """
+
+    SHARED_OWNER = "1d0df30d0658"      # the real orchestrator id from the incident
+    A_SESSION = "/artifacts/019fdcb9/sub-aaaaaaa1"
+    B_SESSION = "/artifacts/019fdcb9/sub-bbbbbbb2"
+
+    async def _fake_gh(self, args, repo, check=True):
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({
+                "number": 7292, "url": "https://github.com/o/r/pull/7292",
+                "title": "t", "state": "OPEN", "isDraft": False,
+                "mergedAt": None, "mergeCommit": None, "headRefOid": "deadbeef",
+                "reviews": [],
+                "comments": [{"url": "c-review-1",
+                              "author": {"login": "jack-michaud"},
+                              "body": "this needs a test",
+                              "createdAt": "2024-01-01T00:00:00Z"}],
+            })
+        if args[0] == "api" and args[1] == "graphql":
+            return ""
+        if args[0] == "api" and "check-runs" in args[1]:
+            return json.dumps({"check_runs": []})
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def _write_a_ledger(self, *, fingerprint: bool):
+        """One watch armed by session A, under the shared ambient owner id."""
+        entry = {"repo": ".", "slug": "o/r", "pr": 7292,
+                 "owner": self.SHARED_OWNER, "seen": [], "quiet_seconds": 0}
+        if fingerprint:
+            entry["session"] = self.A_SESSION
+        self.state_path.write_text(json.dumps(
+            {"watches": {f"o/r#7292@{self.SHARED_OWNER}": entry}}))
+        return json.loads(self.state_path.read_text())
+
+    def _poll_as_b(self):
+        # Session B: its own session dir, but A's id leaked into the ambient
+        # daemon variable, which is exactly what a sub-agent kernel sees.
+        with self.as_session(session_dir=self.B_SESSION,
+                             daemon=self.SHARED_OWNER):
+            with patch.object(pr_watch, "_gh",
+                              new=AsyncMock(side_effect=self._fake_gh)), \
+                    patch.object(pr_watch, "_resolve_slug",
+                                 new=AsyncMock(return_value="o/r")):
+                return _run(pr_watch.poll())
+
+    def test_b_cannot_drain_a_fingerprinted_watch_and_never_even_sees_it(self):
+        before = self._write_a_ledger(fingerprint=True)
+        report = self._poll_as_b()
+        after = json.loads(self.state_path.read_text())
+        # Byte-identical: A's queue is untouched, so A still gets woken.
+        self.assertEqual(after, before)
+        self.assertEqual(json.dumps(after, sort_keys=True),
+                         json.dumps(before, sort_keys=True))
+        # And B is told the truth - the watch is not B's, so B sees nothing.
+        self.assertIn("nothing", report.lower())
+        self.assertNotIn("c-review-1", report)
+
+    def test_b_may_report_a_legacy_watch_but_still_cannot_drain_it(self):
+        # Legacy entry, no fingerprint: B cannot tell it apart from its own, so
+        # it is allowed to REPORT it (losing that would hide real review comments
+        # from whoever is actually watching) but must not consume it.
+        before = self._write_a_ledger(fingerprint=False)
+        report = self._poll_as_b()
+        after = json.loads(self.state_path.read_text())
+        self.assertEqual(after, before)
+        self.assertIn("READ-ONLY", report)
+        self.assertIn("c-review-1", report)
+
+    def test_a_still_gets_its_own_notification_after_b_polled(self):
+        # The victim's side of the bug: silence. Assert A is still woken.
+        self._write_a_ledger(fingerprint=True)
+        self._poll_as_b()
+        with self.as_session(session_dir=self.A_SESSION,
+                             daemon=self.SHARED_OWNER):
+            with patch.object(pr_watch, "_gh",
+                              new=AsyncMock(side_effect=self._fake_gh)), \
+                    patch.object(pr_watch, "_resolve_slug",
+                                 new=AsyncMock(return_value="o/r")):
+                report = _run(pr_watch.poll())
+        self.assertIn("c-review-1", report)
+        self.assertNotIn("READ-ONLY", report)   # A's ownership is provable
+        seen = next(iter(json.loads(self.state_path.read_text())["watches"]
+                         .values()))["seen"]
+        self.assertEqual(seen, ["c-review-1"])  # and A, being the owner, consumes it
+
+    def test_ack_refuses_rather_than_silencing_someone_elses_ledger(self):
+        self._write_a_ledger(fingerprint=True)
+        with self.as_session(session_dir=self.B_SESSION,
+                             daemon=self.SHARED_OWNER):
+            with patch.object(pr_watch, "_gh",
+                             new=AsyncMock(side_effect=self._fake_gh)), \
+                    patch.object(pr_watch, "_resolve_slug",
+                                 new=AsyncMock(return_value="o/r")):
+                with self.assertRaises(pr_watch.PrWatchError) as ctx:
+                    _run(pr_watch.ack(repo=".", pr=7292))
+        self.assertIn("cannot be proved to belong to this session",
+                      str(ctx.exception))
+
+    def test_unwatch_all_no_longer_deletes_other_sessions_watches(self):
+        # `unwatch(all=True)` used to clear the whole file - 57 entries across 6
+        # owners on the machine where this was found.
+        self._write_a_ledger(fingerprint=True)
+        mine_key = "o/r#999@test-owner"
+        state = json.loads(self.state_path.read_text())
+        state["watches"][mine_key] = {"repo": ".", "slug": "o/r", "pr": 999,
+                                      "owner": "test-owner", "seen": ["x"],
+                                      "session": "test-session"}
+        self.state_path.write_text(json.dumps(state))
+        with patch.dict(sys.modules, {"rlm_heartbeat": None}):
+            report = _run(pr_watch.unwatch(all=True))
+        remaining = json.loads(self.state_path.read_text())["watches"]
+        self.assertEqual(list(remaining), [f"o/r#7292@{self.SHARED_OWNER}"])
+        self.assertIn("left alone", report)
+        self.assertIn("cleared 1 watch(es)", report)
+
+
+class OwnerProvenanceTest(IsolatedPaths, unittest.TestCase):
+    """Where an owner id came from decides whether it may authorise a WRITE."""
+
+    def test_explicit_argument_wins_and_is_unambiguous(self):
+        self.assertEqual(pr_watch._owner_provenance("given"), ("given", "explicit"))
+
+    def test_pr_watch_owner_env_is_unambiguous(self):
+        with self.as_session(owner_env="chosen", session_dir="/x/sub-deadbeef",
+                             daemon="ancestor"):
+            self.assertEqual(pr_watch._owner_provenance(), ("chosen", "PR_WATCH_OWNER"))
+
+    def test_daemon_id_at_top_level_is_trusted(self):
+        # A top-level session's RLM_SESSION_DIR basename is the session UUID, so
+        # the ambient daemon id really is its own.
+        with self.as_session(session_dir="/artifacts/019fdcb9-3399-776c-95ad",
+                             daemon="1d0df30d0658"):
+            self.assertEqual(pr_watch._owner_provenance(),
+                             ("1d0df30d0658", "daemon"))
+
+    def test_daemon_id_inside_a_subagent_is_inherited_and_ambiguous(self):
+        # Verified live: in a sub-agent kernel whose own active session id was
+        # 31b2e6874fba, this variable read 1d0df30d0658 - its parent's.
+        with self.as_session(session_dir="/artifacts/019fdcb9/sub-4685289e",
+                             daemon="1d0df30d0658"):
+            owner, provenance = pr_watch._owner_provenance()
+        self.assertEqual(owner, "1d0df30d0658")
+        self.assertEqual(provenance, "inherited")
+        self.assertIn(provenance, pr_watch.AMBIGUOUS_OWNER_SOURCES)
+
+    def test_no_signals_at_all_is_ambiguous(self):
+        with self.as_session():
+            self.assertEqual(pr_watch._owner_provenance(), ("default", "default"))
+
+    def test_resolution_order_is_unchanged_so_live_entries_still_match(self):
+        # The reason the fix is NOT "prefer RLM_SESSION_DIR": every one of the 57
+        # watches on disk is owned by a 12-hex daemon id, and a session-dir name
+        # is `sub-4685289e`, so preferring it would orphan all of them.
+        with self.as_session(session_dir="/artifacts/019fdcb9/sub-4685289e",
+                             daemon="1d0df30d0658"):
+            self.assertEqual(pr_watch._owner(), "1d0df30d0658")
+
+    def test_session_fingerprint_is_per_session_not_shared_with_an_ancestor(self):
+        with self.as_session(session_dir="/artifacts/019fdcb9/sub-aaaa",
+                             daemon="shared"):
+            a = pr_watch._session_fingerprint()
+        with self.as_session(session_dir="/artifacts/019fdcb9/sub-bbbb",
+                             daemon="shared"):
+            b = pr_watch._session_fingerprint()
+        self.assertNotEqual(a, b)   # the property the owner id lacks
+
+
+class ConvergeKeysUnionsBothFormsTest(IsolatedPaths, unittest.TestCase):
+    """A ledger holding BOTH key forms for one PR - live on this machine for
+    fay-service#7295, #7292, #7297 and fay-ui#3733 - must converge to ONE entry
+    with the UNION of the seen-sets. Intersection would swallow whatever only one
+    side had reported; a fresh empty set would replay the PR's whole history."""
+
+    def test_both_forms_collapse_to_one_entry_with_the_union(self):
+        path_key = "/Users/jack/Code/github.com/fayhealthinc/fay-service#7295@own"
+        slug_key = "fayhealthinc/fay-service#7295@own"
+        self.state_path.write_text(json.dumps({"watches": {
+            path_key: {"repo": "/Users/jack/Code/github.com/fayhealthinc/fay-service",
+                       "pr": 7295, "owner": "own", "seen": ["c1", "c2"]},
+            slug_key: {"repo": "/canonical/clone", "pr": 7295, "owner": "own",
+                       "seen": ["c2", "c3"], "session": "/artifacts/x/sub-1111"},
+        }}))
+        with patch.object(pr_watch, "_resolve_slug",
+                          new=AsyncMock(return_value="fayhealthinc/fay-service")):
+            _run(pr_watch._converge_keys())
+        watches = json.loads(self.state_path.read_text())["watches"]
+        self.assertEqual(list(watches), [slug_key])
+        self.assertEqual(watches[slug_key]["seen"], ["c1", "c2", "c3"])
+        # Not the intersection (["c2"]), which would swallow c1 and c3...
+        self.assertNotEqual(watches[slug_key]["seen"], ["c2"])
+        # ...and not a fresh empty set, which would replay the PR as new.
+        self.assertTrue(watches[slug_key]["seen"])
+        # The fingerprint survives, or the entry would degrade to read-only for
+        # its own owner.
+        self.assertEqual(watches[slug_key]["session"], "/artifacts/x/sub-1111")
+
+    def test_convergence_is_idempotent(self):
+        self.state_path.write_text(json.dumps({"watches": {
+            "/repo/path#7297@own": {"repo": "/repo/path", "pr": 7297,
+                                    "owner": "own", "seen": ["a"]}}}))
+        with patch.object(pr_watch, "_resolve_slug",
+                          new=AsyncMock(return_value="o/r")):
+            _run(pr_watch._converge_keys())
+            first = json.loads(self.state_path.read_text())
+            _run(pr_watch._converge_keys())
+        self.assertEqual(json.loads(self.state_path.read_text()), first)
 
 
 if __name__ == "__main__":

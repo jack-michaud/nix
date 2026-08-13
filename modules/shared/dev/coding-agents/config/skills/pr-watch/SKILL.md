@@ -133,6 +133,31 @@ await pr_watch.watch_via_child(repo="/path/to/repo", pr=2,
   head commit `gh api` cannot resolve, degrades to "no CI activity" rather
   than erroring - see `_check_run_failures` in pr_watch's source, which
   mirrors the check-run logic in the `jj-ship` skill's `checks()`.
+## Ownership: which session a watch belongs to
+
+- **A watch records the ARMING session's fingerprint, and that is what decides
+  ownership.** `_owner()`'s fallback is the ambient
+  `PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID`, which a spawned
+  sub-agent **inherits** - so inside a child it names an ancestor, and two
+  sessions resolve to the *same* owner id. `poll(mark_seen=True)` (the default)
+  writes `entry["seen"] |= fresh`, so under that collision whichever session
+  polls first **drains the other's queue permanently**; on the victim's side the
+  symptom is silence, indistinguishable from a quiet PR. Verified live on
+  2026-08-13: a sub-agent's `poll()` matched six of its orchestrator's watches.
+  Re-deriving the owner at poll time cannot fix this (both sessions are the same
+  string), so `watch()`/`serve()` store `session` - from `RLM_SESSION_DIR`, which
+  is per-session - at ARM time, and `_entry_is_mine` matches on it first.
+  `watch_via_child`/`watch_via_sibling` pass the OWNER's fingerprint down, since a
+  watcher child is a different session from the agent it reports to.
+- **An entry that cannot be proved yours is REPORTED, never consumed.** For
+  legacy entries with no fingerprint, `poll()` runs read-only - nothing marked
+  seen, no terminal watch dropped - and leads with a banner saying so. `ack()` and
+  `unwatch(all=True)` refuse instead, having no useful read-only form; `ack()` is
+  pure destruction (it overwrites a seen-set with "everything on the PR"), and
+  `unwatch(all=True)` used to clear *every* session's watches (57 entries across 6
+  owners when that was found) and now clears only provably-own ones. Re-arm a
+  watch from your session, pass `owner=`, or export `PR_WATCH_OWNER` to be
+  authoritative.
 - **Several watchers on one machine are safe.** A watch is keyed
   `<owner/name>#<pr>@<owner-session>`, where the first part is the repo SLUG
   (**not** the local checkout path - keying on the path made the same PR watched

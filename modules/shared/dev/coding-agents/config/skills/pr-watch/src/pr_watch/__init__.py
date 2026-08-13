@@ -151,6 +151,98 @@ def _log_event(slug: str, pr: Any, item: dict) -> None:
 
 # ---------------------------------------------------------------- state ----
 
+# A sub-agent kernel's RLM_SESSION_DIR basename looks like `sub-4685289e`,
+# while a top-level session's is the session UUID. That distinction is the only
+# cheap, local way to tell whether
+# PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID names THIS session or an
+# ancestor: the daemon exports it into the environment, and a spawned sub-agent
+# INHERITS the value, so inside a child it names the parent. Verified live -
+# in a sub-agent kernel whose own active session id was 31b2e6874fba, that
+# variable read 1d0df30d0658, its parent's.
+_SUBAGENT_SESSION_DIR_RE = re.compile(r"^sub-[0-9a-f]+$")
+
+# How an owner id was established, worst-case first. `inherited` means the id
+# came from the ambient daemon variable inside a sub-agent kernel, so it
+# probably names an ANCESTOR; `default` means nothing identified this session at
+# all. Neither may be trusted to authorise a WRITE to somebody's seen-set - see
+# `_require_unambiguous_owner` and poll()'s read-only fallback.
+AMBIGUOUS_OWNER_SOURCES = frozenset({"inherited", "default"})
+
+
+def _owner_provenance(owner: Optional[str] = None) -> tuple[str, str]:
+    """`(owner id, how it was established)`.
+
+    Resolution order is deliberately UNCHANGED from the version that wrote the
+    state file: explicit argument, `PR_WATCH_OWNER`, the ambient daemon session
+    id, then the session-dir name. Reordering this to prefer `RLM_SESSION_DIR`
+    - the obvious-looking fix for the mis-attribution below - would orphan every
+    watch already on disk: all 57 live entries are owned by 12-hex daemon
+    session ids (e.g. `1d0df30d0658`), and a session-dir name is `sub-4685289e`,
+    so not one of them would match its owner's next poll. Silently losing every
+    live watcher is a worse failure than the one being fixed.
+
+    What changes is that the answer now carries its PROVENANCE, so a caller can
+    refuse to destroy state it cannot prove is its own.
+    """
+    if owner:
+        return owner, "explicit"
+    if env := os.environ.get("PR_WATCH_OWNER"):
+        return env, "PR_WATCH_OWNER"
+    session_dir = os.environ.get("RLM_SESSION_DIR")
+    dir_name = Path(session_dir).name if session_dir else ""
+    daemon = os.environ.get("PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID")
+    if daemon:
+        # In a sub-agent kernel this value was inherited from an ancestor, so it
+        # identifies that ancestor's ledger, not this session's.
+        return daemon, ("inherited" if _SUBAGENT_SESSION_DIR_RE.match(dir_name)
+                        else "daemon")
+    if dir_name:
+        return dir_name, "session_dir"
+    return "default", "default"
+
+
+def _session_fingerprint() -> Optional[str]:
+    """A unique, stable id for THIS session, or None if it cannot be known.
+
+    `RLM_SESSION_DIR` is per-session by construction - `.../<uuid>` for a
+    top-level session, `.../<uuid>/sub-<hex>` for a sub-agent - so unlike the
+    ambient daemon session id it is NOT shared with an ancestor. That is what
+    makes it usable as the thing captured at ARM time, which is the only way two
+    sessions with identical ambient environments can ever be told apart in the
+    ledger: an owner id re-derived at poll time is by definition the same string
+    for both of them, so no amount of read-side filtering can distinguish them,
+    and the mis-attribution runs in BOTH directions - each session can drain the
+    other's queue, and the symptom on the victim's side is silence, which looks
+    exactly like a quiet PR.
+
+    Not used as the `owner` id itself: every one of the 57 watches already on
+    disk is owned by a 12-hex daemon session id, so switching identities would
+    orphan all of them. It is stored ALONGSIDE the owner as `session`, and
+    entries that carry it are matched on it in preference to the owner.
+    """
+    explicit = os.environ.get("PR_WATCH_SESSION")
+    if explicit:
+        return explicit
+    session_dir = os.environ.get("RLM_SESSION_DIR")
+    return str(Path(session_dir)) if session_dir else None
+
+
+def _entry_is_mine(entry: dict, mine: str,
+                   my_session: Optional[str]) -> tuple[bool, bool]:
+    """`(belongs to me, provably so)` for one watch entry.
+
+    Prefers the arm-time `session` fingerprint, which is unambiguous in both
+    directions. Falls back to the owner id for entries written before
+    fingerprints existed - that comparison is the ambiguous one, so it reports
+    `provably=False` and the caller must not destroy anything on its strength
+    alone.
+    """
+    session = entry.get("session")
+    if session and my_session:
+        return session == my_session, True
+    return entry.get("owner", mine) == mine, False
+
+
 def _owner(owner: Optional[str] = None) -> str:
     """Who a watch belongs to: the AGENT SESSION that owns it.
 
@@ -158,15 +250,31 @@ def _owner(owner: Optional[str] = None) -> str:
     one to mark an item seen silently swallows the other's notification. The
     watcher CHILD inherits its parent's owner (watch_via_child passes it in), so
     a parent's ack() still reaches its own blocked child.
+
+    See `_owner_provenance` for how the id is established, and why callers that
+    MUTATE another session's seen-set must check the provenance first.
     """
-    if owner:
-        return owner
-    env = os.environ.get("PR_WATCH_OWNER") or os.environ.get(
-        "PRIME_AGENT_INTERNAL_DAEMON_WORKER_ACTIVE_SESSION_ID")
-    if env:
-        return env
-    session_dir = os.environ.get("RLM_SESSION_DIR")
-    return Path(session_dir).name if session_dir else "default"
+    return _owner_provenance(owner)[0]
+
+
+def _require_unambiguous_owner(action: str, owner: Optional[str] = None) -> str:
+    """The owner id, or a loud failure when it cannot be established.
+
+    For destructive operations only (`ack`, `unwatch(all=True)`): guessing an
+    owner and being wrong is worse than an error, because the damage is silent
+    and permanent - the mis-attributed write marks another session's items seen,
+    and those ids never appear as `fresh` again, so its agent is never woken.
+    """
+    resolved, provenance = _owner_provenance(owner)
+    if provenance in AMBIGUOUS_OWNER_SOURCES:
+        raise PrWatchError(
+            f"refusing to {action}: this session's owner id cannot be "
+            f"established unambiguously (best guess {resolved!r}, established "
+            f"by {provenance!r}). In a sub-agent kernel the ambient daemon "
+            f"session id names an ANCESTOR, so acting on it would silence "
+            f"another session's notifications. Pass owner=<id> explicitly, or "
+            f"export PR_WATCH_OWNER.")
+    return resolved
 
 
 @contextmanager
@@ -226,12 +334,21 @@ def _slug_key(slug: str, pr: Any, owner: Optional[str] = None) -> str:
 def _merge_entries(old: dict, new: dict) -> dict:
     """Fold a legacy path-keyed entry into its slug-keyed successor.
 
-    Union of the seen-sets, deliberately: dropping the old one would replay
-    every comment on the PR as new, and dropping the new one would re-hide
-    whatever the slug-keyed watcher had already reported.
+    UNION of the seen-sets, deliberately, and never the intersection or a fresh
+    empty one: dropping either side replays that side's history as new activity,
+    and intersecting swallows everything only one side had reported. Live ledgers
+    really do carry both forms for one PR - fay-service#7295, #7292, #7297 and
+    fay-ui#3733 each had a path-form AND a slug-form key when this was written -
+    so this merge decides whether those PRs replay, go silent, or behave.
+
+    A `session` fingerprint on either side is kept (`new` wins on conflict, being
+    the more recent arm), because an entry that loses its fingerprint downgrades
+    to ambiguous-owner matching and becomes read-only for its own owner.
     """
     merged = {**old, **new}
     merged["seen"] = sorted(set(old.get("seen", [])) | set(new.get("seen", [])))
+    if session := (new.get("session") or old.get("session")):
+        merged["session"] = session
     return merged
 
 
@@ -642,6 +759,10 @@ async def watch(repo: str = ".", pr: Optional[Any] = None,
         state["watches"][key] = {
             "repo": repo, "slug": slug, "pr": pr, "quiet_seconds": quiet_seconds,
             "owner": _owner(),
+            # Captured HERE, at arm time, from the arming session's own
+            # environment - the one moment when this session's identity is not
+            # in doubt. See `_session_fingerprint`.
+            "session": _session_fingerprint(),
             # Union with whatever a migrated path-keyed entry already had, so
             # re-watching from a different checkout does not replay the backlog.
             "seen": sorted(set(existing.get("seen", []))
@@ -668,7 +789,7 @@ async def _ensure_heartbeat(interval: str = "3m") -> dict:
     return {"created": created}
 
 
-async def poll(mark_seen: bool = True) -> str:
+async def poll(mark_seen: bool = True, owner: Optional[str] = None) -> str:
     """Report watched-PR activity that has been quiet for the debounce window.
 
     New activity is held until nothing newer has arrived for `quiet_seconds`
@@ -677,17 +798,47 @@ async def poll(mark_seen: bool = True) -> str:
     A merge or an unmerged close is reported IMMEDIATELY (no debounce - nothing
     further can arrive on a terminal PR) and the watch is then dropped, so the
     heartbeat stops paying for polls of a dead PR.
+
+    READ-ONLY WHEN THE OWNER IS A GUESS. `poll()` normally MUTATES the ledger it
+    reports from - it marks reported items seen and drops terminal watches - so
+    polling under a mis-attributed owner id does not merely read another
+    session's queue, it drains it: those ids never appear as `fresh` again, and
+    the rightful owner is never woken. That happened live on 2026-08-13, when a
+    sub-agent's `poll()` resolved to its ORCHESTRATOR's session id (the ambient
+    daemon variable is inherited by child kernels) and matched six watches
+    belonging to that orchestrator.
+
+    The fault runs BOTH ways - the orchestrator's own poll can equally drain the
+    sub-agent's watches, and on that side the symptom is silence, which is
+    indistinguishable from a quiet PR. So ownership is settled by the arm-time
+    `session` fingerprint where one exists (`_entry_is_mine`), and a legacy entry
+    matched only by the ambiguous owner id is reported READ-ONLY: nothing marked
+    seen, no terminal watch dropped, and a banner saying so on the first line. A
+    read cannot corrupt anyone. Pass `owner=<id>` / export `PR_WATCH_OWNER`, or
+    simply re-arm the watch from this session, to poll authoritatively.
     """
     await _converge_keys()
     state = _load()
-    mine = _owner()
+    mine, provenance = _owner_provenance(owner)
+    my_session = _session_fingerprint()
+    ambiguous = provenance in AMBIGUOUS_OWNER_SOURCES
     now = datetime.now(timezone.utc).timestamp()
     ready_lines: list[str] = []
     holding: list[str] = []
     finished: list[str] = []
+    guessed = 0   # entries claimed only on the strength of an ambiguous owner id
+    wrote = False   # nothing is saved unless an entry was provably writable
     for key, entry in list(state["watches"].items()):
-        if entry.get("owner", mine) != mine:
+        is_mine, proven = _entry_is_mine(entry, mine, my_session)
+        if not is_mine:
             continue   # another session's watcher reports to its own agent
+        # Writes are per-entry, not per-poll: an entry carrying an arm-time
+        # fingerprint is provably this session's and can be marked seen even when
+        # the ambient owner id is untrustworthy, while a legacy entry matched only
+        # by that owner id is reported read-only.
+        may_write = mark_seen and (proven or not ambiguous)
+        if not proven and ambiguous:
+            guessed += 1
         try:
             items = await _activity(entry["repo"], entry["pr"])
         except PrWatchError as exc:
@@ -720,35 +871,79 @@ async def poll(mark_seen: bool = True) -> str:
         if terminal is not None:
             # Drop the watch, not just mark it seen: the PR is terminal, so
             # every future poll would cost a gh round trip to learn nothing.
-            finished.append(f"{key}: {terminal['kind']} - no longer watching "
-                            f"({terminal.get('body')})")
-            state["watches"].pop(key, None)
+            # Dropping is a destructive write, so a read-only poll reports the
+            # terminal state and leaves the entry for its real owner to clear.
+            finished.append(
+                f"{key}: {terminal['kind']} - "
+                + ("left in place (unproven ownership, read-only)" if not may_write
+                   else "no longer watching")
+                + f" ({terminal.get('body')})")
+            if may_write:
+                state["watches"].pop(key, None)
+                wrote = True
             continue
-        if mark_seen:
+        if may_write:
             entry["seen"] = sorted(seen | {i["id"] for i in fresh})
-    if mark_seen or finished:
+            wrote = True
+    if wrote:
         _save(state)
     ready_lines.extend(finished)
+    # The banner leads, so a human or agent reading this can never mistake a
+    # read-only report for a poll that consumed its queue.
+    banner = ([f"pr-watch: {guessed} watch(es) reported READ-ONLY - owner "
+               f"{mine!r} was established by {provenance!r} and those entries "
+               f"carry no arm-time session fingerprint, so they may belong to "
+               f"another session. Nothing was marked seen and no watch was "
+               f"dropped for them. Re-arm them from this session, pass "
+               f"owner=<id>, or export PR_WATCH_OWNER to poll authoritatively."]
+              if guessed else [])
     if not state["watches"] and not ready_lines:
-        return "pr-watch: nothing is being watched."
+        return "\n".join(banner + ["pr-watch: nothing is being watched."])
     if not ready_lines:
-        return "pr-watch: nothing ready." + ("\n  " + "\n  ".join(holding) if holding else "")
-    return "\n".join(ready_lines + (["", "still settling:"] + holding if holding else []))
+        return "\n".join(banner + ["pr-watch: nothing ready."
+                                   + ("\n  " + "\n  ".join(holding) if holding else "")])
+    return "\n".join(banner + ready_lines
+                     + (["", "still settling:"] + holding if holding else []))
 
 
-async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False) -> str:
+async def ack(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
+              owner: Optional[str] = None) -> str:
     """Mark everything currently on a PR as seen, without reporting it.
 
     Call this right after you post a reply. The agent comments through the same
     GitHub account as its human, so its OWN reply would otherwise read as new
     activity and wake it up to answer itself.
+
+    Acts only on watches this session can PROVE are its own - an arm-time
+    `session` fingerprint, or an owner id whose provenance is unambiguous. ack is
+    pure destruction (it overwrites a seen-set with "everything currently on the
+    PR"), so under a mis-attributed owner `ack(all=True)` would silence every
+    notification another session was waiting for. Unlike `poll()` there is no
+    useful read-only version of it, so unprovable entries are skipped, and a call
+    that can prove nothing raises rather than guessing.
     """
-    mine = _owner()
+    mine, provenance = _owner_provenance(owner)
+    my_session = _session_fingerprint()
+    ambiguous = provenance in AMBIGUOUS_OWNER_SOURCES
     state = _load()
-    # Only this session's own watches: acking another session's watcher would
-    # silence a notification its own agent never saw.
-    keys = [k for k, v in state["watches"].items() if v.get("owner", mine) == mine] \
-        if all else [await _migrated_key(repo, pr)]
+
+    def _provably_mine(entry: dict) -> bool:
+        is_mine, proven = _entry_is_mine(entry, mine, my_session)
+        return is_mine and (proven or not ambiguous)
+
+    if all:
+        keys = [k for k, v in state["watches"].items() if _provably_mine(v)]
+        if not keys and ambiguous:
+            _require_unambiguous_owner("ack every watch", owner)
+    else:
+        keys = [await _migrated_key(repo, pr, owner if not ambiguous else None)]
+        target = state["watches"].get(keys[0])
+        if target is not None and not _provably_mine(target):
+            raise PrWatchError(
+                f"refusing to ack {keys[0]!r}: it cannot be proved to belong to "
+                f"this session (owner {mine!r} established by {provenance!r}, "
+                f"entry session {target.get('session')!r}). Acking it would "
+                f"silence another session's notifications.")
     current: dict[str, list] = {}
     for key in keys:
         entry = state["watches"].get(key)
@@ -774,11 +969,33 @@ async def watching() -> str:
         for k, v in state["watches"].items())
 
 
-async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False) -> str:
-    """Stop watching one PR, or every PR (`all=True`) and cancel the heartbeat."""
+async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False,
+                  owner: Optional[str] = None) -> str:
+    """Stop watching one PR, or every PR of THIS session (`all=True`) and cancel
+    the heartbeat.
+
+    `all=True` used to clear `state["watches"]` outright - every session's
+    watches, not just the caller's - which contradicts both this module's
+    per-session isolation and the rest of these functions, and would delete
+    dozens of other agents' live ledgers in one call (57 entries across 6 owners
+    on this machine when the bug was found). It now clears only the watches this
+    session can prove are its own (an arm-time fingerprint, or an unambiguous
+    owner id), and refuses rather than guessing when it can prove none.
+    """
     state = _load()
     if all:
-        state["watches"] = {}
+        mine, provenance = _owner_provenance(owner)
+        my_session = _session_fingerprint()
+        ambiguous = provenance in AMBIGUOUS_OWNER_SOURCES
+        dropped = []
+        for k, v in state["watches"].items():
+            is_mine, proven = _entry_is_mine(v, mine, my_session)
+            if is_mine and (proven or not ambiguous):
+                dropped.append(k)
+        if not dropped and ambiguous:
+            _require_unambiguous_owner("unwatch every PR", owner)
+        for key in dropped:
+            state["watches"].pop(key, None)
         _save(state)
         try:
             import rlm_heartbeat
@@ -788,8 +1005,12 @@ async def unwatch(repo: str = ".", pr: Optional[Any] = None, all: bool = False) 
                 if isinstance(job, dict) and job.get("label") == HEARTBEAT_LABEL:
                     await rlm_heartbeat.delete(job["id"])
         except Exception as exc:  # heartbeat teardown must not lose the state write
-            return f"pr-watch: cleared watchlist; heartbeat cleanup failed: {exc}"
-        return "pr-watch: cleared watchlist and cancelled the heartbeat."
+            return (f"pr-watch: cleared {len(dropped)} watch(es) owned by "
+                    f"{mine!r}; other sessions' watches were left alone; "
+                    f"heartbeat cleanup failed: {exc}")
+        return (f"pr-watch: cleared {len(dropped)} watch(es) owned by {mine!r} "
+                f"and cancelled the heartbeat. Other sessions' watches were "
+                f"left alone.")
     key = await _migrated_key(repo, pr)
     state = _load()   # _migrated_key may have rewritten the file under us
     state["watches"].pop(key, None)
@@ -811,7 +1032,8 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
                 owner: Optional[str] = None,
                 notify_role: str = "parent",
                 notify_name: Optional[str] = None,
-                ignore_signatures: Sequence[str] = ()) -> str:
+                ignore_signatures: Sequence[str] = (),
+                session: Optional[str] = None) -> str:
     """Block here, polling a PR, and message an agent when activity settles.
 
     Meant to be the ONLY call a watcher sub-agent makes: the loop runs inside
@@ -833,6 +1055,12 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
 
     `ignore_signatures` keeps a watcher from waking its owner with the owner's
     own signed comments; see `_has_ignored_signature`.
+
+    `session` is the OWNER's session fingerprint, not the watcher's: a watcher
+    child is a different session from the agent it reports to, so it must record
+    whose ledger this is rather than its own (`watch_via_child` passes both
+    `owner` and `session` down). Left None, and with no `owner` given either,
+    the watcher is arming for itself and its own fingerprint is stored.
     """
     import time
 
@@ -858,6 +1086,13 @@ async def serve(repo: str = ".", pr: Optional[Any] = None,
                                                  "pr": pr,
                                                  "owner": _owner(owner)})
         entry["slug"] = slug
+        # `owner` given means this watch belongs to another session (the one that
+        # spawned this watcher), so its fingerprint must come from the caller;
+        # inventing this watcher's own would make the real owner's poll skip the
+        # very entry it is waiting on.
+        fingerprint = session if session or owner else _session_fingerprint()
+        if fingerprint:
+            entry["session"] = fingerprint
         entry["quiet_seconds"] = quiet_seconds
         if seeded is not None:
             entry["seen"] = seeded
@@ -963,7 +1198,8 @@ CHILD_TASK = """You are a PR watcher. Make exactly ONE tool call and nothing els
     import pr_watch
     print(await pr_watch.serve(repo={repo!r}, pr={pr!r}, quiet_seconds={quiet}, \
                                poll_seconds={poll}, max_hours={hours},
-                               owner={owner!r}, ignore_signatures={ignore!r}))
+                               owner={owner!r}, ignore_signatures={ignore!r},
+                               session={session!r}))
 
 That call BLOCKS for up to {hours} hours by design - this is expected, not a
 hang. It polls the PR inside that single cell and messages your parent itself
@@ -991,12 +1227,18 @@ async def watch_via_child(repo: str = ".", pr: Optional[Any] = None,
     # The child inherits THIS session's owner id, so the seen-set it shares is
     # the one this agent's ack() writes to - and a watcher in another session
     # keeps its own.
+    # Both identities travel with the task: `owner` keeps the legacy ledger key
+    # matching this session, `session` is the unambiguous fingerprint that lets
+    # this session's poll() recognise the entry as its own even when another
+    # session shares its ambient owner id.
     task = CHILD_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
                              quiet=quiet_seconds, poll=poll_seconds,
                              hours=max_hours, owner=_owner(),
-                             ignore=tuple(ignore_signatures))
+                             ignore=tuple(ignore_signatures),
+                             session=_session_fingerprint())
     handle = await rlm.run(task, name=name)
     return {"child": getattr(handle, "name", name), "owner": _owner(),
+            "session": _session_fingerprint(),
             "rlm_child_id": getattr(handle, "rlm_child_id", None),
             "watching": f"{Path(repo).resolve()}#{pr}",
             "note": "The child messages you when activity settles; never poll it."}
@@ -1044,7 +1286,8 @@ else:
                                poll_seconds={poll}, max_hours={hours},
                                owner={owner!r}, notify_role="sibling",
                                notify_name={caller!r},
-                               ignore_signatures={ignore!r}))
+                               ignore_signatures={ignore!r},
+                               session={session!r}))
 
 That call BLOCKS for up to {hours} hours by design - this is expected, not a
 hang. It polls the PR inside that single cell and messages session {caller!r}
@@ -1091,7 +1334,8 @@ async def watch_via_sibling(repo: str = ".", pr: Optional[Any] = None,
     task = SIBLING_TASK.format(repo=str(Path(repo).resolve()), pr=pr,
                                quiet=quiet_seconds, poll=poll_seconds,
                                hours=max_hours, owner=_owner(), caller=caller,
-                               ignore=tuple(ignore_signatures))
+                               ignore=tuple(ignore_signatures),
+                               session=_session_fingerprint())
     request = (
         f"pr-watch: I am at max RLM recursion depth and cannot spawn my own "
         f"watcher child. Please spawn a sub-agent named {name!r} with this "
