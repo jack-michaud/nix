@@ -104,12 +104,28 @@ attest --action report --repo . --base main --head my-bookmark
 base64url(json(payload)) + "." + hmac_sha256(key, base64url_payload)
 ```
 
-`payload` is `{claim, diff_sha, repo, base, head, doc_id, quote_sha,
-requirements_n, agent, ts, nonce}`. The key is `~/.prime/agent/attest.key`, mode
+`payload` is `{claim, diff_sha, repo, base, base_sha, merge_base, head, head_sha,
+doc_id, quote_sha, requirements_n, agent, ts, nonce}`. `base` is whatever the
+caller named; `base_sha`, `merge_base` and `head_sha` are the commits that were
+actually measured, so an audit of the log can tell the difference. The key is `~/.prime/agent/attest.key`, mode
 0600, created on first use from `secrets.token_bytes(32)`.
 
-`diff_sha` is `sha256` of `git diff <base>...<head>` **computed inside the
-attest function and never accepted from the caller**. The diff flags
+`diff_sha` is `sha256` of `git diff <merge-base> <head>` **computed inside the
+attest function and never accepted from the caller**.
+
+**A base branch NAME resolves through `origin/<name>`, never a local ref.**
+Resolving it locally is a false-attestation bug: a local `main` that is behind
+the remote is still an ancestor of the feature branch, so the merge base is the
+old tip and the diff quietly grows every commit other people merged in between.
+That happened for real on fayhealthinc/fay-service#7373 - an eval scored 136
+comment lines and 7 patching calls out of strangers' merged tests, and signed the
+result - and it breaks the verify direction too, refusing honest tokens as
+"bound to a different diff". So `_base_anchor()` fetches the single ref, resolves
+`refs/remotes/origin/<name>`, and **raises** rather than guessing when origin is
+configured but the ref will not resolve, or when the local branch has commits the
+remote does not. A hex sha is taken as given; a repository with no `origin` at
+all falls back to the local ref, since there is nothing for it to be stale
+against. The diff flags
 (`--no-color --no-ext-diff --no-textconv --unified=3 --find-renames`) are fixed
 so a user's pager colour, difftool or textconv filter cannot change the bytes
 being hashed.

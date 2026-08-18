@@ -79,6 +79,9 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
   is an explicit, rarely-needed opt-in past this check, not a default.
 - `open_pr()` and `mark_ready()` **require attestations for a non-draft PR** -
   see "Attestations".
+- `update_body(pr, body)` replaces a PR body. Use it rather than raw REST: it is
+  the only supported way to rewrite a body, and it is what carries a
+  `Shipped-With:` trailer through an edit.
 - `checks()` state is `passing | failing | pending | none`; a repo with no configured checks
   reports `none`, not an error.
 - `comments()` returns issue comments, review bodies, and **unresolved review threads**
@@ -202,6 +205,26 @@ HEAD, so any `gh` subcommand that infers the current branch fails
 The merge still lands; delete the remote branch with
 `gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<branch>`.
 
+
+**`gh pr edit` cannot write a PR body, in any repository.** Up to and including
+gh 2.69.0 that subcommand asks GraphQL for `projectCards`, which GitHub now
+rejects outright (`Projects (classic) is being deprecated ...`), so it exits 1
+having written nothing - reproduced on fayhealthinc/fay-service#7329 and
+fayhealthinc/fay-ui#3769. It took the `Shipped-With:` trailer down with it:
+`mark_ready` could not stamp one, which made the attestation gate unsatisfiable
+for any PR whose body had to be updated. `update_body()` uses
+`PATCH /repos/{owner}/{repo}/pulls/{n}` instead, passing the body as JSON in a
+file (never an argv or shell word - bodies contain backticks, `$` and newlines).
+`gh pr create --body`, `gh pr comment` and `gh pr ready` are unaffected and are
+still used as-is.
+
+**A stale local base ref used to be read as tampering.** `mark_ready` recomputes
+the diff hash from the PR's base branch name before comparing it to each token,
+so when the local `main` was behind the remote it hashed the wrong diff and
+refused honest attestations with "bound to a different diff". `attest` now
+anchors a base branch name on `origin/<name>` and diffs from the merge base, so
+both directions hold: an honest token verifies against a stale checkout, and a
+token minted against a stale base is refused.
 
 - Binaries are overridable with the `JJ_BIN` / `GH_BIN` environment variables.
 - Every failure raises `jj_ship.JjShipError` carrying the failing argv and its stderr.
