@@ -55,6 +55,18 @@ let
   skillNames = attrNames
     (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/skills));
 
+  # Prime Agent loads extensions from ~/.prime/agent/extensions/<name>/index.js.
+  # Same live-symlink treatment as the skills, set likewise read off the
+  # filesystem. An extension is the only place a check can run BEFORE the agent's
+  # model reads a message, which is why ship-check needs one.
+  mkAgentExtension = name: {
+    ".prime/agent/extensions/${name}".source = pkgs.runCommandLocal name { } ''
+      ln -s ${escapeShellArg "${configDir}/extensions/${name}"} $out
+    '';
+  };
+  extensionNames = attrNames
+    (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/extensions));
+
   rules = {
     # Substituted so the `paths` trigger globs carry the real vault path.
     "vault.md" = { substitute = true; };
@@ -143,7 +155,8 @@ in {
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
         ln -s ${escapeShellArg "${configDir}/pi-extensions/agent-rules.ts"} $out
       '';
-    } (mapAttrsToList mkAgentRule rules ++ map mkAgentSkill skillNames);
+    } (mapAttrsToList mkAgentRule rules ++ map mkAgentSkill skillNames
+      ++ map mkAgentExtension extensionNames);
 
     home-manager.users.${config.user.name} = { lib, ... }: {
       home.activation = {
