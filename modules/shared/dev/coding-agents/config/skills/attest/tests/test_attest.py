@@ -463,5 +463,108 @@ class ThresholdsTest(AttestTestCase):
         self.assertIn("unknown threshold", str(ctx.exception))
 
 
+class BaseAnchoringTest(unittest.TestCase):
+    """The base a claim is measured against must come from the remote.
+
+    fayhealthinc/fay-service#7373: `base="main"` resolved to a stale local
+    `main`, so the merge base was an old tip and the eval scored other people's
+    merged commits - and then signed that result.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp = Path(self._tmp.name)
+        self.remote = tmp / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.remote)],
+                       check=True, capture_output=True)
+        self.repo = tmp / "repo"
+        self.repo.mkdir()
+        _git(self.repo.parent, "init", "-q", "-b", "main", str(self.repo))
+        _git(self.repo, "config", "user.email", "t@example.com")
+        _git(self.repo, "config", "user.name", "Test")
+        _git(self.repo, "remote", "add", "origin", str(self.remote))
+        (self.repo / "README.md").write_text("start\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "initial")
+        _git(self.repo, "push", "-q", "origin", "main")
+        self.old_main = _git(self.repo, "rev-parse", "main").strip()
+        # Somebody else's work lands on main...
+        (self.repo / "their_feature.py").write_text("# 20 lines of theirs\n" * 20)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "someone else's merge")
+        _git(self.repo, "push", "-q", "origin", "main")
+        self.new_main = _git(self.repo, "rev-parse", "main").strip()
+        # ...our branch is cut from the up-to-date main...
+        _git(self.repo, "checkout", "-q", "-b", "feature")
+        (self.repo / "ours.py").write_text("value = 1\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "ours")
+        # ...and our local `main` is then left behind, which is the normal state
+        # of a long-lived checkout.
+        _git(self.repo, "update-ref", "refs/heads/main", self.old_main)
+
+    def test_a_stale_local_main_does_not_drag_other_peoples_commits_into_the_diff(self):
+        resolved = _run(attest.resolve_diff(str(self.repo), "main", "feature"))
+        self.assertEqual(resolved["base_sha"], self.new_main)
+        self.assertEqual(resolved["merge_base"], self.new_main)
+        self.assertEqual(resolved["base_how"], "origin/main")
+        self.assertIn("ours.py", resolved["diff"])
+        self.assertNotIn("their_feature.py", resolved["diff"])
+
+    def test_the_stale_local_ref_really_would_have_measured_the_wrong_diff(self):
+        """The failing direction: without remote anchoring, the same call is wrong.
+
+        Asserting the fix without asserting the bug leaves no evidence the
+        anchoring is load-bearing.
+        """
+        stale = _git(self.repo, "diff", "--no-color", f"{self.old_main}...feature")
+        self.assertIn("their_feature.py", stale)
+        resolved = _run(attest.resolve_diff(str(self.repo), "main", "feature"))
+        self.assertNotEqual(
+            hashlib_sha256(stale), hashlib_sha256(resolved["diff"]),
+            "the stale-ref diff and the anchored diff must not be the same bytes")
+
+    def test_a_local_base_the_remote_does_not_have_is_refused_not_guessed(self):
+        _git(self.repo, "checkout", "-q", "main")
+        _git(self.repo, "reset", "-q", "--hard", self.new_main)
+        (self.repo / "local_only.py").write_text("x = 1\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "local only commit")
+        with self.assertRaises(attest.AttestError) as ctx:
+            _run(attest.resolve_diff(str(self.repo), "main", "feature"))
+        self.assertIn("ambiguous", str(ctx.exception))
+
+    def test_an_unfetchable_base_with_a_configured_origin_raises(self):
+        with self.assertRaises(attest.AttestError) as ctx:
+            _run(attest.resolve_diff(str(self.repo), "no-such-branch", "feature"))
+        message = str(ctx.exception)
+        self.assertIn("cannot anchor the base", message)
+        self.assertIn("no-such-branch", message)
+
+    def test_an_explicit_sha_base_is_taken_as_given(self):
+        resolved = _run(attest.resolve_diff(str(self.repo), self.new_main, "feature"))
+        self.assertEqual(resolved["base_sha"], self.new_main)
+        self.assertEqual(resolved["base_how"], "explicit sha")
+
+    def test_the_issued_token_records_the_shas_it_measured(self):
+        os.environ["ATTEST_HOME"] = str(Path(self._tmp.name) / "state")
+        self.addCleanup(os.environ.pop, "ATTEST_HOME", None)
+        token = _run(attest.eval_passed(str(self.repo), "main", "feature"))
+        payload = attest.decode(token)
+        self.assertEqual(payload["base_sha"], self.new_main)
+        self.assertEqual(payload["merge_base"], self.new_main)
+        self.assertEqual(payload["head_sha"],
+                         _git(self.repo, "rev-parse", "feature").strip())
+        self.assertEqual(token.report["revisions"]["base_how"], "origin/main")
+        record = json.loads(attest.log_path().read_text().strip().splitlines()[-1])
+        self.assertEqual(record["base_sha"], self.new_main)
+
+
+def hashlib_sha256(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 if __name__ == "__main__":
     unittest.main()

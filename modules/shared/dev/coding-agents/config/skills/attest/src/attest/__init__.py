@@ -148,12 +148,21 @@ def _sign(payload_b64: str) -> str:
 
 def _issue(claim: str, diff_sha: str, repo: str, base: str, head: str,
            doc_id: Optional[str], quote_sha: Optional[str],
-           requirements_n: int, report: dict[str, Any]) -> Token:
+           requirements_n: int, report: dict[str, Any], *,
+           base_sha: Optional[str] = None, merge_base: Optional[str] = None,
+           head_sha: Optional[str] = None) -> Token:
+    # base_sha/merge_base/head_sha are recorded, not just used: `base` is a
+    # branch NAME, and a name is not evidence of what was measured. An audit of
+    # attest.log.jsonl can now tell whether a claim was bound to the merge base
+    # of the remote base branch or to something else.
     payload = {
         "claim": claim,
         "diff_sha": diff_sha,
         "repo": str(Path(repo).resolve()),
         "base": base,
+        "base_sha": base_sha,
+        "merge_base": merge_base,
+        "head_sha": head_sha,
         "head": head,
         "doc_id": doc_id,
         "quote_sha": quote_sha,
@@ -336,11 +345,92 @@ async def _rev(repo: str, name: str) -> str:
         f"a real commit.")
 
 
+def _looks_like_sha(name: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{7,40}", name or ""))
+
+
+async def _base_anchor(repo: str, base: str) -> tuple[str, str]:
+    """Resolve a PR's base to a commit, anchored on the REMOTE. Returns (sha, how).
+
+    Resolving a base branch by name against whatever the local ref happens to
+    point at is a false-attestation bug, not an inconvenience. A local `main`
+    that is behind the remote is an ancestor of the feature branch, so
+    `merge-base(local main, head)` is the OLD tip, and the "diff of my change"
+    silently grows every commit other people merged in between. Seen for real on
+    fayhealthinc/fay-service#7373: an eval scored 136 comment lines and 7
+    patching calls out of strangers' merged tests, and signed the result. The
+    signature is what everything downstream trusts, so this must not guess.
+
+    Therefore: a hex sha is taken as given, and a NAME resolves only through
+    `refs/remotes/origin/<name>` (refreshed with a single-ref fetch first, since
+    a stale remote-tracking ref reproduces the same bug one step removed). If
+    only a local ref of that name exists, or the local ref has commits the
+    remote does not, this raises instead of choosing - the failing direction has
+    to be loud, because the alternative failure is a confident wrong number.
+    """
+    if _looks_like_sha(base):
+        r = await _git(repo, "rev-parse", "--verify", f"{base}^{{commit}}", check=False)
+        if r["code"] == 0:
+            return r["out"].strip(), "explicit sha"
+    fetch = await _git(repo, "fetch", "--quiet", "origin", base, check=False)
+    remote = await _git(repo, "rev-parse", "--verify",
+                        f"refs/remotes/origin/{base}^{{commit}}", check=False)
+    local = await _git(repo, "rev-parse", "--verify", f"refs/heads/{base}^{{commit}}",
+                       check=False)
+    if remote["code"] != 0:
+        origin = await _git(repo, "remote", "get-url", "origin", check=False)
+        if origin["code"] != 0:
+            # No remote at all: the local ref is the only thing this base could
+            # mean, and there is nothing for it to be stale against.
+            if local["code"] != 0:
+                raise AttestError(
+                    f"cannot resolve the base {base!r} in {repo}: neither "
+                    f"'refs/heads/{base}' nor an 'origin' remote exists.")
+            return local["out"].strip(), f"local {base} (no origin remote)"
+        raise AttestError(
+            f"cannot anchor the base {base!r} on the remote in {repo}: "
+            f"'refs/remotes/origin/{base}' does not resolve, and origin is "
+            f"configured ({origin['out'].strip()}), so falling back to a local ref "
+            f"would risk measuring the wrong diff"
+            + (f" (local {base!r} is at {local['out'].strip()[:12]})"
+               if local["code"] == 0 else "")
+            + f". Fetch it (`jj git fetch` / `git fetch origin {base}`; this run's "
+            f"fetch said: {(fetch['err'] or fetch['out'] or 'nothing').splitlines()[:1]}"
+            f"), or pass base='<sha>'.")
+    remote_sha = remote["out"].strip()
+    if local["code"] == 0 and local["out"].strip() != remote_sha:
+        local_sha = local["out"].strip()
+        ancestor = await _git(repo, "merge-base", "--is-ancestor", local_sha,
+                              remote_sha, check=False)
+        if ancestor["code"] != 0:
+            raise AttestError(
+                f"the base {base!r} is ambiguous in {repo}: local {local_sha[:12]} "
+                f"is not an ancestor of origin/{base} ({remote_sha[:12]}), so the "
+                f"two disagree about what this change is measured against. "
+                f"Reconcile them, or pass base='<sha>'.")
+    return remote_sha, f"origin/{base}"
+
+
+async def resolve_diff(repo: str, base: str, head: str) -> dict[str, Any]:
+    """The diff a PR shows, with every revision it was computed from.
+
+    `{base, base_sha, base_how, head, head_sha, merge_base, diff, diff_sha}`.
+    The merge base is computed and passed to `git diff` explicitly rather than
+    left implicit in `base...head`, so the value that was actually measured is
+    recorded in the token and can be audited afterwards.
+    """
+    base_sha, base_how = await _base_anchor(repo, base)
+    head_sha = await _rev(repo, head)
+    merge_base = (await _git(repo, "merge-base", base_sha, head_sha))["out"].strip()
+    diff = (await _git(repo, "diff", *_DIFF_FLAGS, merge_base, head_sha))["out"]
+    return {"base": base, "base_sha": base_sha, "base_how": base_how, "head": head,
+            "head_sha": head_sha, "merge_base": merge_base, "diff": diff,
+            "diff_sha": hashlib.sha256(diff.encode()).hexdigest()}
+
+
 async def diff_text(repo: str, base: str, head: str) -> str:
-    """The canonical `git diff <base>...<head>` text that gets hashed."""
-    base_rev, head_rev = await _rev(repo, base), await _rev(repo, head)
-    r = await _git(repo, "diff", *_DIFF_FLAGS, f"{base_rev}...{head_rev}")
-    return r["out"]
+    """The canonical merge-base diff text that gets hashed."""
+    return (await resolve_diff(repo, base, head))["diff"]
 
 
 async def diff_sha(repo: str, base: str, head: str) -> str:
@@ -580,13 +670,17 @@ async def eval_passed(repo: str, base: str, head: str) -> Token:
     The returned token is a `str`; `tok.report` carries the counts and the
     exclusions, so the numbers can go in the PR body.
     """
-    diff = await diff_text(repo, base, head)
-    report = eval_report(diff)
+    resolved = await resolve_diff(repo, base, head)
+    report = eval_report(resolved["diff"])
+    report["revisions"] = {key: resolved[key] for key in
+                           ("base", "base_sha", "base_how", "head", "head_sha",
+                            "merge_base")}
     if report["failures"]:
         raise AttestError("eval_passed: " + "\n".join(report["failures"]))
-    return _issue("eval_passed",
-                  hashlib.sha256(diff.encode()).hexdigest(),
-                  repo, base, head, None, None, 0, report)
+    return _issue("eval_passed", resolved["diff_sha"],
+                  repo, base, head, None, None, 0, report,
+                  base_sha=resolved["base_sha"], merge_base=resolved["merge_base"],
+                  head_sha=resolved["head_sha"])
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +782,8 @@ async def design_reviewed(repo: str, base: str, head: str, design_doc_id: str,
             f"design_reviewed: the quote does not appear in {doc['id']} "
             f"({doc.get('url')}) even ignoring whitespace. Quote the design "
             f"you actually read.\n  looked for: {needle[:200]!r}")
-    diff = await diff_text(repo, base, head)
+    resolved = await resolve_diff(repo, base, head)
+    diff = resolved["diff"]
     touched = touched_paths(diff)
     entries = [tuple(r) for r in requirements]
     if not entries:
@@ -715,11 +810,15 @@ async def design_reviewed(repo: str, base: str, head: str, design_doc_id: str,
         "quote_matched": needle[:300],
         "requirements": [{"requirement": t, "citation": c} for t, c in entries],
         "touched_paths": sorted(touched),
+        "revisions": {key: resolved[key] for key in
+                      ("base", "base_sha", "base_how", "head", "head_sha",
+                       "merge_base")},
     }
-    return _issue("design_reviewed",
-                  hashlib.sha256(diff.encode()).hexdigest(),
+    return _issue("design_reviewed", resolved["diff_sha"],
                   repo, base, head, doc["id"],
-                  hashlib.sha256(needle.encode()).hexdigest(), len(entries), report)
+                  hashlib.sha256(needle.encode()).hexdigest(), len(entries), report,
+                  base_sha=resolved["base_sha"], merge_base=resolved["merge_base"],
+                  head_sha=resolved["head_sha"])
 
 
 # ---------------------------------------------------------------------------

@@ -371,7 +371,22 @@ elif argv[:2] == ["pr", "view"]:
     print(json.dumps({"number": 1, "url": "https://github.com/o/r/pull/1",
                       "body": "**Original body.**", "headRefName": "feature",
                       "baseRefName": "main", "isDraft": True}))
-elif argv[:2] in (["pr", "edit"], ["pr", "ready"]):
+elif argv[:2] == ["pr", "edit"]:
+    # Real gh (<= 2.69.0) cannot do this at all: it asks GraphQL for
+    # projectCards, which GitHub now rejects. Reproduced live on
+    # fayhealthinc/fay-service#7329 and fayhealthinc/fay-ui#3769. Faking it as
+    # a success would let a regression back to `pr edit` pass this suite.
+    sys.stderr.write("GraphQL: Projects (classic) is being deprecated in favor "
+                     "of the new Projects experience, see: "
+                     "https://github.blog/changelog/2024-05-23-sunset-notice-"
+                     "projects-classic/. (repository.pullRequest.projectCards)\n")
+    sys.exit(1)
+elif argv[:3] == ["api", "--method", "PATCH"]:
+    payload = json.load(open(argv[argv.index("--input") + 1]))
+    with open(os.environ["FAKE_GH_LOG"] + ".patch", "a") as fh:
+        fh.write(json.dumps({"path": argv[3], "payload": payload}) + "\n")
+    print(json.dumps({"number": 1}))
+elif argv[:2] == ["pr", "ready"]:
     pass
 else:
     sys.stderr.write("unexpected: %r\n" % (argv,))
@@ -390,15 +405,31 @@ class AttestationEnforcementTest(unittest.TestCase):
         tmp = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
+        # A real bare remote, pushed to, rather than a plausible-looking GitHub
+        # URL: attest anchors a base branch on `origin/<base>` (see its
+        # _base_anchor - a local ref can be stale and silently measure other
+        # people's merged commits), so a fixture with an unfetchable origin
+        # cannot attest anything. GH_REPO supplies the slug that the URL used to.
+        self.remote = tmp / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.remote)],
+                       check=True, capture_output=True)
         self.repo = tmp / "repo"
         self.repo.mkdir()
         _git(tmp, "init", "-q", "-b", "main", str(self.repo))
         _git(self.repo, "config", "user.email", "t@example.com")
         _git(self.repo, "config", "user.name", "Test")
-        _git(self.repo, "remote", "add", "origin", "git@github.com:o/r.git")
+        _git(self.repo, "remote", "add", "origin", str(self.remote))
         (self.repo / "README.md").write_text("start\n")
         _git(self.repo, "add", "-A")
         _git(self.repo, "commit", "-qm", "initial")
+        _git(self.repo, "push", "-q", "origin", "main")
+        self.stale_main = _git(self.repo, "rev-parse", "main").strip()
+        # Somebody else's work lands on main before our branch is cut, so a local
+        # `main` left at `stale_main` is behind by a real commit.
+        (self.repo / "theirs.py").write_text("# their line\n" * 12)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "someone else's merge")
+        _git(self.repo, "push", "-q", "origin", "main")
         _git(self.repo, "checkout", "-q", "-b", "feature")
         (self.repo / "app.py").write_text("value = 1\n")
         _git(self.repo, "add", "-A")
@@ -414,7 +445,7 @@ class AttestationEnforcementTest(unittest.TestCase):
         self.addCleanup(self._restore)
         os.environ["ATTEST_HOME"] = str(tmp / "state")
         os.environ["FAKE_GH_LOG"] = str(self.gh_log)
-        os.environ.pop("GH_REPO", None)
+        os.environ["GH_REPO"] = "o/r"
         self._saved_gh_bin = jj_ship.GH_BIN
         jj_ship.GH_BIN = str(gh)
         jj_ship._SLUG_CACHE.clear()
@@ -438,6 +469,13 @@ class AttestationEnforcementTest(unittest.TestCase):
             if argv[:2] == ["pr", "create"]:
                 return argv[argv.index("--body") + 1]
         raise AssertionError(f"no `pr create` in {self.gh_calls()!r}")
+
+    def patched_bodies(self):
+        log = Path(str(self.gh_log) + ".patch")
+        if not log.exists():
+            raise AssertionError(f"no PATCH call in {self.gh_calls()!r}")
+        return [json.loads(line)["payload"]["body"]
+                for line in log.read_text().strip().split("\n") if line]
 
     def tokens(self):
         """Both required claims, signed against the current diff.
@@ -518,10 +556,55 @@ class AttestationEnforcementTest(unittest.TestCase):
         result = _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=tokens))
         self.assertTrue(result["ready"])
         self.assertIn(["pr", "ready"], [c[:2] for c in self.gh_calls()])
-        edit = next(c for c in self.gh_calls() if c[:2] == ["pr", "edit"])
-        edited_body = edit[edit.index("--body") + 1]
+        edited_body = self.patched_bodies()[-1]
         self.assertIn("**Original body.**", edited_body)
         self.assertIn("Shipped-With:", edited_body)
+
+    def test_the_body_is_written_by_rest_patch_and_never_by_gh_pr_edit(self):
+        """`gh pr edit --body` exits 1 against real GitHub, so using it at all
+        is the bug. The fake gh fails that subcommand exactly as the real one
+        does, so this asserts the write goes somewhere that works."""
+        _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=self.tokens()))
+        self.assertNotIn(["pr", "edit"], [c[:2] for c in self.gh_calls()])
+        patch = next(c for c in self.gh_calls() if c[:2] == ["api", "--method"])
+        self.assertEqual(patch[:3], ["api", "--method", "PATCH"])
+        self.assertEqual(patch[3], "repos/o/r/pulls/1")
+
+    def test_a_body_of_shell_metacharacters_survives_byte_for_byte(self):
+        """Bodies carry backticks, `$`, quotes and newlines. They travel as
+        JSON in a file, so nothing interpolates them."""
+        nasty = ('`make check` && $HOME "quoted" \'single\'\n\n'
+                 '```sh\necho $(id) > /tmp/x\n```\n')
+        _run(jj_ship.update_body(1, nasty, repo=str(self.repo)))
+        self.assertEqual(self.patched_bodies()[-1], nasty)
+
+
+    # -- the base a token is verified against ------------------------------
+    # A stale local base ref breaks BOTH directions, and the second is worse:
+    # mark_ready recomputes the diff hash from the PR's baseRefName ("main") and
+    # compares it to each token, so a stale local `main` tells an agent its
+    # honest attestation is invalid - which reads as tampering and invites it to
+    # re-attest until something sticks.
+
+    def test_an_honest_token_is_still_accepted_when_the_local_base_ref_is_stale(self):
+        tokens = self.tokens()
+        _git(self.repo, "update-ref", "refs/heads/main", self.stale_main)
+        result = _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=tokens))
+        self.assertTrue(result["ready"])
+        self.assertIn("Shipped-With:", self.patched_bodies()[-1])
+
+    def test_a_token_minted_against_a_stale_base_is_refused(self):
+        _git(self.repo, "update-ref", "refs/heads/main", self.stale_main)
+        stale_sha = _run(attest.diff_sha(str(self.repo), self.stale_main, "feature"))
+        tokens = [
+            str(attest._issue("design_reviewed", stale_sha, str(self.repo), "main",
+                              "feature", "ENG-1", "q" * 64, 1, {})),
+            str(attest._issue("eval_passed", stale_sha, str(self.repo), "main",
+                              "feature", None, None, 0, {})),
+        ]
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=tokens))
+        self.assertIn("bound to a different diff", str(ctx.exception))
 
     def test_ship_keeps_its_old_signature_and_takes_attestations_by_keyword(self):
         signature = inspect.signature(jj_ship.ship)

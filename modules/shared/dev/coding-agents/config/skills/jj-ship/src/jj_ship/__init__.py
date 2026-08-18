@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -247,6 +248,41 @@ async def _gh(args: list[str], repo: str = ".", **kw) -> dict:
     # infer the repo from a git remote in cwd, which there is not one of.
     return await _exec([GH_BIN, *args], cwd=repo,
                        env={"GH_REPO": await _resolve_slug(repo)}, **kw)
+
+
+async def update_body(pr: Any, body: str, repo: str = ".") -> dict:
+    """Replace a pull request's body. The supported way to rewrite a PR body.
+
+    There was no body-update API here at all before, which is how a skill whose
+    whole premise is "go through jj_ship" came to document a raw
+    `gh api --method PATCH` for its readers instead. Callers should never need
+    raw REST to carry a trailer through a body edit, so this exists.
+
+    Under the hood it is the REST API rather than `gh pr edit`.
+
+    `gh pr edit` is unusable: up to and including gh 2.69.0 it fetches the PR
+    with a field set containing `projectCards`, and GitHub's GraphQL API now
+    hard-errors on that field ("Projects (classic) is being deprecated ...
+    (repository.pullRequest.projectCards)"), so every `gh pr edit --body`
+    exits 1 without writing anything. Reproduced live against two different
+    repositories, fayhealthinc/fay-service#7329 and fayhealthinc/fay-ui#3769,
+    so it is a client-side defect and not a repo setting. The consequence was
+    that `mark_ready` could never stamp its `Shipped-With:` trailer - an
+    attestation gate nobody could satisfy. `PATCH /repos/{owner}/{repo}/pulls/
+    {number}` touches no Projects field and works.
+
+    The body travels as JSON in a temp file handed to `gh api --input`; it is
+    never interpolated into a shell word or an argv `--body` value, because
+    real bodies contain backticks, `$`, quotes and newlines.
+    """
+    slug = await _resolve_slug(repo)
+    number = str(pr)
+    with tempfile.TemporaryDirectory() as tmp:
+        payload = Path(tmp) / "pr-body.json"
+        payload.write_text(json.dumps({"body": body}), encoding="utf-8")
+        return await _gh(["api", "--method", "PATCH",
+                          f"repos/{slug}/pulls/{number}",
+                          "--input", str(payload)], repo=repo)
 
 
 async def _template(revset: str, template: str, repo: str = ".") -> str:
@@ -527,7 +563,7 @@ async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
         head or info.get("headRefName"), "to mark a PR ready for review")
     number = str(info["number"])
     body = _with_trailer(info.get("body") or "", token_ids)
-    await _gh(["pr", "edit", number, "--body", body], repo=repo)
+    await update_body(number, body, repo=repo)
     r = await _gh(["pr", "ready", number], repo=repo, check=False)
     if r["code"] != 0 and "already" not in (r["err"] + r["out"]).lower():
         raise JjShipError(f"gh pr ready failed: {r['err'] or r['out']}")
