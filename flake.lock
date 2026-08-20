@@ -169,7 +169,29 @@
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",
         "nixpkgs": "nixpkgs",
-        "nixpkgs-git": "nixpkgs-git"
+        "nixpkgs-git": "nixpkgs-git",
+        "treehouse": "treehouse"
+      }
+    },
+    "treehouse": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787225951,
+        "narHash": "sha256-FT9Vsn7Lha1lKAfc+BOLSFAPjA4MDJiJwDRGUwyCK1Q=",
+        "owner": "jack-michaud",
+        "repo": "treehouse",
+        "rev": "e8f31a5724c5d7cea2eb49a66d88cb3ff0d3f562",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jack-michaud",
+        "ref": "vcs-seam",
+        "repo": "treehouse",
+        "type": "github"
       }
     }
   },
