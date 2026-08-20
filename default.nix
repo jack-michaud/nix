@@ -32,7 +32,11 @@ with lib.my;
     nixPathInputs = mapAttrsToList (n: v: "${n}=${v}") filteredInputs;
     registryInputs = mapAttrs (_: v: { flake = v; }) filteredInputs;
   in {
-    package = pkgs.nixFlakes;
+    # `nixFlakes` was the pre-stabilisation alias for a flakes-capable nix;
+    # nixpkgs has since removed the alias, and plain `nix` ships flake support.
+    # Only DAHDEE actually evaluates this: DAMOCLES/KRONOS set `nix.enable =
+    # false` (Determinate manages their daemon), which skips `nix.package`.
+    package = pkgs.nix;
     extraOptions = ''
       experimental-features = nix-command flakes
       builders-use-substitutes = true

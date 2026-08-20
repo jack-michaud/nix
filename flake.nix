@@ -27,6 +27,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Jack's fork of kunchenguid/treehouse (vcs-seam branch): same tool as
+    # upstream, plus a Jujutsu (jj) backend that is only used when
+    # TREEHOUSE_VCS=jj is set (see modules/shared/dev/treehouse.nix).
+    treehouse = {
+      url = "github:jack-michaud/treehouse/vcs-seam";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
     # Built in nix (see modules/shared/shells/herdr) rather than via
     # `herdr plugin install`, which shells out to the system cargo.
