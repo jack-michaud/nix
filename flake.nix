@@ -27,11 +27,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Jack's fork of kunchenguid/treehouse (vcs-seam branch): same tool as
-    # upstream, plus a Jujutsu (jj) backend that is only used when
+    # Upstream treehouse, pinned to the v2.3.0 release: the first release
+    # containing the merged Jujutsu (jj) backend, which is only used when
     # TREEHOUSE_VCS=jj is set (see modules/shared/dev/treehouse.nix).
     treehouse = {
-      url = "github:jack-michaud/treehouse/vcs-seam";
+      url = "github:kunchenguid/treehouse/v2.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

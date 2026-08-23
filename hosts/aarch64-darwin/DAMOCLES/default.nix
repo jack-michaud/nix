@@ -78,7 +78,7 @@
     # Private Node/TS tool (flake input, builds its own buildNpmPackage
     # output); KRONOS gets it too since it reuses this config.
     dev.agent-harness.enable = true;
-    # Jack's treehouse fork (flake input, built from source), with
+    # Upstream treehouse v2.3.0 (flake input, built from source), with
     # TREEHOUSE_VCS=jj set so it uses its jj backend on this machine.
     # KRONOS gets it too since it reuses this config.
     dev.treehouse.enable = true;

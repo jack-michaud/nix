@@ -180,16 +180,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1787225951,
-        "narHash": "sha256-FT9Vsn7Lha1lKAfc+BOLSFAPjA4MDJiJwDRGUwyCK1Q=",
-        "owner": "jack-michaud",
+        "lastModified": 1787404973,
+        "narHash": "sha256-8C6bg2jfqTSmI3N4tdzyIRuJKN12DA/SjcuL9hBPgEg=",
+        "owner": "kunchenguid",
         "repo": "treehouse",
-        "rev": "e8f31a5724c5d7cea2eb49a66d88cb3ff0d3f562",
+        "rev": "35b8a41d8b0f5cb10d46673441255086f45088bf",
         "type": "github"
       },
       "original": {
-        "owner": "jack-michaud",
-        "ref": "vcs-seam",
+        "owner": "kunchenguid",
+        "ref": "v2.3.0",
         "repo": "treehouse",
         "type": "github"
       }

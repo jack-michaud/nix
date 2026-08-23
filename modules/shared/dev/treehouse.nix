@@ -4,11 +4,22 @@ with lib;
 with lib.my;
 let
   cfg = config.modules.dev.treehouse;
-  # Jack's fork of kunchenguid/treehouse (vcs-seam branch), built from source
-  # by the input's own flake. The fork adds a Jujutsu (jj) backend; which
-  # backend runs is selected at runtime by TREEHOUSE_VCS (unset = git, same
-  # behaviour as upstream).
-  treehouse = inputs.treehouse.packages.${pkgs.system}.default;
+  # Upstream kunchenguid/treehouse (v2.3.0 release), built from source by
+  # the input's own flake. v2.3.0 is the first release with the merged
+  # Jujutsu (jj) backend; which backend runs is selected at runtime by
+  # TREEHOUSE_VCS (unset = git, the pre-2.3.0 behaviour).
+  #
+  # nativeCheckInputs is extended with python3 because v2.3.0's checkPhase
+  # executes the repo's real no-mistakes CI gate script, whose attestation
+  # parser needs python3 on PATH (it reports UNPARSEABLE without it).
+  # Upstream's flake omits it since GitHub's ubuntu-latest runner has
+  # python3 ambiently; the nix build sandbox does not, so the gate tests
+  # fail there. Adding the interpreter keeps the tests running instead of
+  # disabling doCheck.
+  treehouse = inputs.treehouse.packages.${pkgs.system}.default.overrideAttrs
+    (old: {
+      nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pkgs.python3 ];
+    });
 in {
   options.modules.dev.treehouse = {
     enable = mkBoolOpt false;
@@ -25,7 +36,7 @@ in {
       home.packages = [ treehouse ];
 
       # Opt treehouse into its jj backend for Jack's repositories. Without
-      # this the fork behaves exactly like upstream git treehouse.
+      # this treehouse keeps its default git backend.
       home.sessionVariables.TREEHOUSE_VCS = "jj";
     };
   };
