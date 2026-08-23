@@ -72,6 +72,10 @@
     # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
     # overrides the role to "work" in flake.nix.
     dev.coding-agents.enable = true;
+    # Current Go toolchain (go + gopls) from nixpkgs. The system Go at
+    # /usr/local/bin/go is 1.11 (2018) and cannot build modern Go modules.
+    # KRONOS gets it too since it reuses this config.
+    dev.go.enable = true;
     # Private Go tool (flake input, built from source); KRONOS gets it too
     # since it reuses this config.
     dev.comment-trainer.enable = true;
