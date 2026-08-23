@@ -169,7 +169,29 @@
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",
         "nixpkgs": "nixpkgs",
-        "nixpkgs-git": "nixpkgs-git"
+        "nixpkgs-git": "nixpkgs-git",
+        "treehouse": "treehouse"
+      }
+    },
+    "treehouse": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787404973,
+        "narHash": "sha256-8C6bg2jfqTSmI3N4tdzyIRuJKN12DA/SjcuL9hBPgEg=",
+        "owner": "kunchenguid",
+        "repo": "treehouse",
+        "rev": "35b8a41d8b0f5cb10d46673441255086f45088bf",
+        "type": "github"
+      },
+      "original": {
+        "owner": "kunchenguid",
+        "ref": "v2.3.0",
+        "repo": "treehouse",
+        "type": "github"
       }
     }
   },

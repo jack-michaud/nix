@@ -27,6 +27,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Upstream treehouse, pinned to the v2.3.0 release: the first release
+    # containing the merged Jujutsu (jj) backend, which is only used when
+    # TREEHOUSE_VCS=jj is set (see modules/shared/dev/treehouse.nix).
+    treehouse = {
+      url = "github:kunchenguid/treehouse/v2.3.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
     # Built in nix (see modules/shared/shells/herdr) rather than via
     # `herdr plugin install`, which shells out to the system cargo.

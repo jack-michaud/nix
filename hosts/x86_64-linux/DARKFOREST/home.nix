@@ -79,6 +79,14 @@ in
           type = types.attrsOf types.attrs;
           default = { };
         };
+        # prime-agent (and any module following its pattern) also sets
+        # `home.sessionVariables`; without this declaration the whole
+        # evaluation fails with "option ... does not exist", because a
+        # submodule rejects undeclared options even under `mkIf false`.
+        options.home.sessionVariables = mkOption {
+          type = types.attrs;
+          default = { };
+        };
       });
       default = { };
     };
@@ -137,6 +145,9 @@ in
       (_user: u: u.home.activation)
       config.home-manager.users);
     home.file = mkMerge (mapAttrsToList (_user: u: u.home.file)
+      config.home-manager.users);
+    home.sessionVariables = mkMerge (mapAttrsToList
+      (_user: u: u.home.sessionVariables)
       config.home-manager.users);
   };
 }
