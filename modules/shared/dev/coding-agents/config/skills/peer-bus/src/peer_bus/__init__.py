@@ -1,14 +1,15 @@
 """peer_bus — consensual, scoped connections between agent sessions over a filesystem bus.
 
 Disk holds only discovery (registry) and in-flight frames (spool, claimed atomically by
-rename). Connections, offers, and history live in each agent's kernel. Wake-up is a courier
-session sending family-legal agent_messages; see watcher_prompt(). Protocol v1:
+rename). Connections, offers, and history live in each agent's kernel. Wake-up is an
+agent_message from a session that has family reach to the target -- often a courier, but a
+root peer can only be woken by another root, directly; see watcher_prompt(). Protocol v1:
 OFFER / ACCEPT (may narrow scopes) / REJECT / MSG / REVOKE. Connections are permanent
 until revoked. Kernel-state loss degrades to a fresh OFFER, so consent is re-confirmed,
 never resurrected. Set PEER_BUS_TRACE=1 to log frames to trace.jsonl (off by default);
 PEER_BUS_DIR overrides the bus root.
 """
-import json, os, time, uuid, pathlib
+import json, os, re, time, uuid, pathlib
 
 _STATE = {"me": None, "conns": {}, "offers": {}, "history": []}
 BUS_DIR = None  # optional override; else PEER_BUS_DIR env, else ~/.prime/agent/peer-bus
@@ -35,10 +36,44 @@ def _me():
     if not _STATE["me"]: raise RuntimeError("peer_bus.init(alias) first")
     return _STATE["me"]
 
-def publish(purpose: str, accepting: bool = True) -> dict:
-    """Opt in to discovery. Unlisted agents cannot be offered to."""
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+def identity() -> dict:
+    """Best-effort daemon identity of THIS session: {"session_id", "depth"}, keys omitted if unknown.
+
+    An alias is a bus name, not a routing address: agent_message resolves receivers inside the
+    family roster by session id/name, so a peer that publishes no session id cannot be woken
+    except by guesswork. The daemon exports no session-id variable today, so we fall back to the
+    only path that always contains our OWN id: RLM_HARNESS_STATE_DIR is
+    <artifact-dir-of-this-session>/harness. RLM_SESSION_DIR is deliberately NOT used -- for a
+    subagent it is the PARENT's artifact dir plus a sub-<hash> segment, so reading a uuid out of
+    it would publish someone else's identity. Unknown beats wrong: we omit, never guess.
+    """
+    out = {}
+    sid = os.environ.get("PRIME_AGENT_SESSION_ID") or os.environ.get("RLM_SESSION_ID")
+    if not sid:
+        found = _UUID.findall(os.environ.get("RLM_HARNESS_STATE_DIR", ""))
+        sid = found[-1] if found else None
+    if sid: out["session_id"] = sid
+    try: out["depth"] = int(os.environ["RLM_DEPTH"])
+    except (KeyError, ValueError): pass
+    return out
+
+def publish(purpose: str, accepting: bool = True, session_id: str = None, depth: int = None) -> dict:
+    """Opt in to discovery. Unlisted agents cannot be offered to.
+
+    Also records who to send an agent_message to (session_id) and whether this session is a root
+    (depth 0), because only a root can wake another root. Pass them explicitly from the
+    authoritative source when you have it -- me = (await agent_message.list_agents())["current"]
+    -- otherwise they are sniffed from the environment and simply omitted if unavailable, which
+    keeps old readers and identity-less publishers working (both fields are optional).
+    """
     _reg().mkdir(parents=True, exist_ok=True)
-    card = {"alias": _me(), "purpose": purpose, "accepting": accepting, "published": _now()}
+    who = identity()
+    if session_id is not None: who["session_id"] = session_id
+    if depth is not None: who["depth"] = depth
+    _STATE["identity"] = who
+    card = {"alias": _me(), "purpose": purpose, "accepting": accepting, "published": _now(), **who}
     (_reg() / f"{_me()}.json").write_text(json.dumps(card, indent=1))
     return card
 
@@ -159,14 +194,57 @@ def connection(peer_alias: str) -> Conn:
 def connections() -> dict:
     return _STATE["conns"]
 
-def watcher_prompt(target_alias: str, wakes: int = 10, minutes: int = 60) -> str:
-    """Generate the courier prompt; spawn it in any session with family reach to the target."""
-    d = _spool(target_alias)
+def _poll_clause(d, wakes, minutes) -> str:
     return (f"Poll the directory {d} every 2 seconds. Each time one or more *.json files appear "
-            f"(ignore dotfiles): send await agent_message.send('peer-bus wake: N frame(s) in your spool', "
-            f"receiver_role='sibling', receiver_name='{target_alias}') with N the count, then wait until "
-            f"the directory has no *.json files before watching for the next batch. Exit after {wakes} "
-            f"notifications or {minutes} minutes. Never notify when no frames exist; never touch any file.")
+            f"(ignore dotfiles): send ONE agent_message reading 'peer-bus wake: N frame(s) in your "
+            f"spool' with N the count, then wait until the directory has no *.json files before "
+            f"watching for the next batch. Exit after {wakes} notifications or {minutes} minutes. "
+            f"Never notify when no frames exist; never touch any file.")
+
+def watcher_prompt(target_alias: str, wakes: int = 10, minutes: int = 60) -> str:
+    """Generate the courier prompt for waking a peer -- or refuse, when no courier could reach it.
+
+    agent_message reach is family-only (parent, siblings, own children) and every courier you can
+    spawn is your CHILD, so a courier is never a root. Roots are siblings of each other, therefore
+    a root peer is reachable only by another root messaging it directly from its own kernel. That
+    case is provable from the registry, and failing here beats spawning a courier that will die on
+    'No sibling matches ...' -- which is exactly what happened on 2026-08-25.
+    """
+    d = _spool(target_alias)
+    card = {c["alias"]: c for c in registry()}.get(target_alias, {})
+    sid, target_depth = card.get("session_id"), card.get("depth")
+    mine = _STATE.get("identity") or identity()
+
+    if sid and target_depth == 0:
+        fix = (f"You are a root too, so send it directly from your own kernel:\n"
+               f"  await agent_message.send('peer-bus wake: frames in your spool', "
+               f"receiver_role='sibling', receiver_name='{sid}')"
+               if mine.get("depth") == 0 else
+               f"You are not a root, so you cannot reach it either: ask a root session (your "
+               f"top-level ancestor) to send directly to receiver_role='sibling', "
+               f"receiver_name='{sid}'.")
+        raise ValueError(
+            f"'{target_alias}' is a ROOT session (id {sid}); roots are reachable only as siblings, "
+            f"and any courier you spawn is your child, so no courier can ever wake it. {fix}\n"
+            f"Not urgent either way: {target_alias} claims its spool the next time it runs pump().")
+
+    if sid:
+        return (f"You are a peer-bus courier for the session with id {sid} (bus alias "
+                f"'{target_alias}'). First establish reach: roster = await "
+                f"agent_message.list_agents(); find the entry whose 'id' is '{sid}'. Send with that "
+                f"entry's 'relationship' as receiver_role and its 'name' as receiver_name (omit "
+                f"receiver_name when the target is your parent). If no entry matches you have NO "
+                f"reach -- say so to your parent and exit immediately; never guess a receiver name "
+                f"from the bus alias. {_poll_clause(d, wakes, minutes)}")
+
+    return (f"You are a peer-bus courier for the bus alias '{target_alias}'. REACH WARNING: that "
+            f"peer published no session id, so its alias is only a guess at a receiver name -- "
+            f"agent_message resolves receiver_name against session names in your family roster "
+            f"(parent, siblings, children), not against bus aliases, and roots are reachable only "
+            f"by other roots. Check await agent_message.list_agents() first and use the matching "
+            f"entry's relationship and name; if nothing matches, report no reach to your parent "
+            f"and exit rather than retrying. A missed wake only delays delivery -- the peer drains "
+            f"its own spool with pump() on its next turn. {_poll_clause(d, wakes, minutes)}")
 
 def dump_state() -> str:
     return json.dumps(_STATE, indent=1)
