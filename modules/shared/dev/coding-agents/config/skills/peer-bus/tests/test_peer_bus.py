@@ -186,3 +186,44 @@ def test_watcher_prompt_warns_when_identity_is_unknown(bus, env):
     assert "REACH WARNING" in prompt and "bob" in prompt
     assert "pump()" in prompt                                       # wakes optimise, never guarantee
     assert str(peer_bus._spool("bob")) in prompt
+
+
+def test_watcher_prompt_allows_a_root_to_watch_its_own_spool(bus, env):
+    """A root CAN be woken by a courier it spawns itself: the courier wakes its own parent."""
+    env.setenv("PRIME_AGENT_SESSION_ID", ROOT_A); env.setenv("RLM_DEPTH", "0")
+    bus("a"); peer_bus.init("alice"); peer_bus.publish("root, self-watching")
+    prompt = peer_bus.watcher_prompt("alice")                       # NOT a ValueError
+    assert ROOT_A in prompt                                         # my own id, as the receiver
+    assert "agent_message.list_agents()" in prompt                  # role comes from the roster...
+    assert "omit receiver_name when the target is your parent" in prompt  # ...and resolves to parent
+    assert str(peer_bus._spool("alice")) in prompt
+
+
+def test_watcher_prompt_allows_self_watch_when_identity_is_unknowable(bus, env):
+    """Kernel-state loss leaves only the alias: identity() is empty, so alias equality decides."""
+    bus("a"); peer_bus.init("alice"); peer_bus.publish("root", session_id=ROOT_A, depth=0)
+    peer_bus._STATE.pop("identity")                                 # card on disk, identity gone
+    assert peer_bus.identity() == {}                                # the runtime is silent
+    assert ROOT_A in peer_bus.watcher_prompt("alice")               # alias alone proves self
+
+
+def test_watcher_prompt_still_refuses_a_different_root(bus, env):
+    """The self exception must not leak: another root's depth-0 card is still a refusal."""
+    env.setenv("PRIME_AGENT_SESSION_ID", ROOT_A); env.setenv("RLM_DEPTH", "0")
+    bus("b"); peer_bus.init("bob"); peer_bus.publish("acceptor", session_id=ROOT_B, depth=0)
+    bus("a"); peer_bus.init("alice"); peer_bus.publish("initiator")
+    with pytest.raises(ValueError) as e:
+        peer_bus.watcher_prompt("bob")
+    assert "ANOTHER ROOT" in str(e.value)
+
+
+def test_root_refusal_does_not_claim_no_courier_can_ever_wake_a_root(bus, env):
+    """The refusal must name the target's own courier as the other way in, not deny it."""
+    env.setenv("PRIME_AGENT_SESSION_ID", ROOT_A); env.setenv("RLM_DEPTH", "0")
+    bus("b"); peer_bus.init("bob"); peer_bus.publish("acceptor", session_id=ROOT_B, depth=0)
+    bus("a"); peer_bus.init("alice"); peer_bus.publish("initiator")
+    with pytest.raises(ValueError) as e:
+        peer_bus.watcher_prompt("bob")
+    msg = str(e.value)
+    assert "no courier YOU spawn" in msg and "A courier IT spawns can" in msg
+    assert "no courier can ever wake it" not in msg                 # the misdirecting absolute

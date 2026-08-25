@@ -2,8 +2,9 @@
 
 Disk holds only discovery (registry) and in-flight frames (spool, claimed atomically by
 rename). Connections, offers, and history live in each agent's kernel. Wake-up is an
-agent_message from a session that has family reach to the target -- often a courier, but a
-root peer can only be woken by another root, directly; see watcher_prompt(). Protocol v1:
+agent_message from a session that has family reach to the target -- often a courier, but ANOTHER
+root can only be woken by a root directly, while any agent (root included) can be woken by a
+courier it spawns for its own spool; see watcher_prompt(). Protocol v1:
 OFFER / ACCEPT (may narrow scopes) / REJECT / MSG / REVOKE. Connections are permanent
 until revoked. Kernel-state loss degrades to a fresh OFFER, so consent is re-confirmed,
 never resurrected. Set PEER_BUS_TRACE=1 to log frames to trace.jsonl (off by default);
@@ -63,7 +64,8 @@ def publish(purpose: str, accepting: bool = True, session_id: str = None, depth:
     """Opt in to discovery. Unlisted agents cannot be offered to.
 
     Also records who to send an agent_message to (session_id) and whether this session is a root
-    (depth 0), because only a root can wake another root. Pass them explicitly from the
+    (depth 0), because another root is wakeable only by a root sending directly, or by a courier
+    that root spawns for its own spool. Pass them explicitly from the
     authoritative source when you have it -- me = (await agent_message.list_agents())["current"]
     -- otherwise they are sniffed from the environment and simply omitted if unavailable, which
     keeps old readers and identity-less publishers working (both fields are optional).
@@ -202,20 +204,30 @@ def _poll_clause(d, wakes, minutes) -> str:
             f"Never notify when no frames exist; never touch any file.")
 
 def watcher_prompt(target_alias: str, wakes: int = 10, minutes: int = 60) -> str:
-    """Generate the courier prompt for waking a peer -- or refuse, when no courier could reach it.
+    """Generate the courier prompt for waking a peer -- or refuse, when no courier of yours reaches it.
 
     agent_message reach is family-only (parent, siblings, own children) and every courier you can
     spawn is your CHILD, so a courier is never a root. Roots are siblings of each other, therefore
-    a root peer is reachable only by another root messaging it directly from its own kernel. That
-    case is provable from the registry, and failing here beats spawning a courier that will die on
+    ANOTHER root is reachable only by a root messaging it directly from its own kernel. That case
+    is provable from the registry, and failing here beats spawning a courier that will die on
     'No sibling matches ...' -- which is exactly what happened on 2026-08-25.
+
+    Watching your OWN spool is the exception and is always allowed, root or not: the courier is
+    your child, so it wakes you as its PARENT. The generic branch already emits that correctly --
+    the courier reads its roster, finds you listed with relationship 'parent', and omits
+    receiver_name -- so self-watch only needs the root refusal to step aside.
     """
     d = _spool(target_alias)
     card = {c["alias"]: c for c in registry()}.get(target_alias, {})
     sid, target_depth = card.get("session_id"), card.get("depth")
     mine = _STATE.get("identity") or identity()
 
-    if sid and target_depth == 0:
+    # Am I the target? Alias first: it is the one signal that survives a silent runtime, where
+    # identity() legitimately returns {} and no session id can be compared. The id is belt-and-
+    # braces for the case where I published under a different alias in an earlier kernel.
+    is_self = bool(target_alias == _STATE.get("me") or (sid and sid == mine.get("session_id")))
+
+    if sid and target_depth == 0 and not is_self:
         fix = (f"You are a root too, so send it directly from your own kernel:\n"
                f"  await agent_message.send('peer-bus wake: frames in your spool', "
                f"receiver_role='sibling', receiver_name='{sid}')"
@@ -224,8 +236,10 @@ def watcher_prompt(target_alias: str, wakes: int = 10, minutes: int = 60) -> str
                f"top-level ancestor) to send directly to receiver_role='sibling', "
                f"receiver_name='{sid}'.")
         raise ValueError(
-            f"'{target_alias}' is a ROOT session (id {sid}); roots are reachable only as siblings, "
-            f"and any courier you spawn is your child, so no courier can ever wake it. {fix}\n"
+            f"'{target_alias}' is ANOTHER ROOT session (id {sid}); roots are reachable only as "
+            f"siblings, and every courier you spawn is your child, so no courier YOU spawn can "
+            f"wake it. A courier IT spawns can -- that child wakes its own parent -- so the other "
+            f"option is to ask '{target_alias}' to self-watch. {fix}\n"
             f"Not urgent either way: {target_alias} claims its spool the next time it runs pump().")
 
     if sid:
