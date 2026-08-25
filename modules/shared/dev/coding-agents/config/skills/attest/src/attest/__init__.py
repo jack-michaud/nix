@@ -717,6 +717,28 @@ def _linear_key() -> str:
         f"{_LINEAR_KEY_PATHS[0]} (chmod 600).")
 
 
+def _read_design_doc_file(source: str) -> dict[str, Any]:
+    path = Path(source).expanduser()
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        raise AttestError(f"design_reviewed: design doc {path} is empty")
+    return {"id": str(path), "title": path.name,
+            "url": path.resolve().as_uri(), "text": text}
+
+
+async def load_design_doc(source: str) -> dict[str, Any]:
+    """Load a design doc from wherever it lives.
+
+    Linear is one place a design doc lives, not the only one: a spec.md in the
+    repo, a proposal, or an exported lavish plan is as much the design as a
+    tracker issue. A `source` naming an existing file is read from disk;
+    anything else is treated as a Linear ID and fetched.
+    """
+    if Path(source).expanduser().is_file():
+        return _read_design_doc_file(source)
+    return await fetch_design_doc(source)
+
+
 async def fetch_design_doc(doc_id: str) -> dict[str, Any]:
     """Fetch a Linear issue and return {id, title, url, text}.
 
@@ -764,15 +786,16 @@ async def design_reviewed(repo: str, base: str, head: str, design_doc_id: str,
     Three things are checked, and any failure raises instead of returning a
     token:
 
-    1. `design_doc_id` is FETCHED from Linear - so the document must exist and
-       be readable.
+    1. `design_doc_id` is LOADED - a path to an existing file (spec.md, a
+       proposal, an exported lavish plan) is read from disk, anything else is
+       fetched from Linear - so the document must exist and be readable.
     2. `quote` appears in the fetched text verbatim modulo whitespace - so the
        document must have been read, not just named.
     3. every `requirements` entry `("requirement text", "path/file.py:LINE")`
        names a path the diff actually touches - so the mapping from requirement
        to code is checked against the code, not asserted.
     """
-    doc = await fetch_design_doc(design_doc_id)
+    doc = await load_design_doc(design_doc_id)
     needle = _squash(quote)
     if not needle:
         raise AttestError("design_reviewed: `quote` is empty; quote the "

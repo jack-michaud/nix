@@ -1,7 +1,7 @@
 ---
 name: attest
 description: Produce signed, diff-bound attestations that a change was reviewed against its design document and passes the code-quality eval, for the shipping path to require. Use before opening a non-draft PR or marking one ready for review, when jj-ship refuses a PR for a missing or stale attestation, or to audit which claims an agent has issued.
-compatibility: Needs `git` on PATH. `design_reviewed()` additionally needs a Linear API key (LINEAR_API_KEY or ~/.config/linear/api_key), because it fetches the design document. Key, log and thresholds live under ~/.prime/agent/ (override the directory with ATTEST_HOME).
+compatibility: Needs `git` on PATH. `design_reviewed()` needs a Linear API key (LINEAR_API_KEY or ~/.config/linear/api_key) only when `design_doc_id` is a Linear ID; a design doc that lives on disk (spec.md, proposal, exported lavish plan) is read directly. Key, log and thresholds live under ~/.prime/agent/ (override the directory with ATTEST_HOME).
 ---
 
 # attest
@@ -18,6 +18,12 @@ tok_design = await attest.design_reviewed(
     requirements=[("release the slot", "src/queue.ts:88")],
 )
 tok_eval = await attest.eval_passed(repo=REPO, base="main", head="my-bookmark")
+
+`design_doc_id` names the design doc wherever it lives: a Linear ID (`"ENG-123"`)
+is fetched from Linear; a path to an existing file — a `spec.md` in the repo, a
+design proposal, an exported lavish plan — is read from disk with no Linear key
+needed. The same checks apply either way: the quote must appear in the loaded
+text, and every requirement must cite a path the diff touches.
 
 await jj_ship.open_pr("Title", body=BODY, repo=REPO,
                       attestations=[tok_design, tok_eval])
