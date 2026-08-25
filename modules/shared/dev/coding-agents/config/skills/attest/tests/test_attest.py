@@ -259,6 +259,45 @@ class DesignReviewedTest(AttestTestCase):
         self.assertEqual(payload["requirements_n"], 1)
         self.assertEqual(token.report["doc"]["id"], "ENG-7")
 
+
+    def test_a_file_path_is_read_from_disk_with_no_linear_involved(self):
+        # No serve_design: a working Linear is deliberately absent.
+        doc = self.tmp / "spec.md"
+        doc.write_text(DESIGN)
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.design_reviewed(
+            repo=str(repo), base="main", head="feature",
+            design_doc_id=str(doc),
+            quote="The queue must release its slot when no announcement is eligible.",
+            requirements=[("release the slot", "src/app.py:3")]))
+        payload = attest.decode(token)
+        self.assertEqual(payload["claim"], "design_reviewed")
+        self.assertEqual(payload["doc_id"], str(doc))
+        self.assertEqual(token.report["doc"]["url"], doc.resolve().as_uri())
+
+    def test_a_quote_matches_inside_an_exported_html_plan(self):
+        doc = self.tmp / "plan.html"
+        doc.write_text("<h2>Rules</h2><p>The queue must release its slot\n"
+                       "when no announcement is eligible.</p>")
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.design_reviewed(
+            repo=str(repo), base="main", head="feature",
+            design_doc_id=str(doc),
+            quote="The queue must release its slot when no announcement is eligible.",
+            requirements=[("release the slot", "src/app.py:3")]))
+        self.assertEqual(attest.decode(token)["claim"], "design_reviewed")
+
+    def test_an_empty_design_file_raises(self):
+        doc = self.tmp / "spec.md"
+        doc.write_text("   \n")
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        with self.assertRaises(attest.AttestError) as ctx:
+            _run(attest.design_reviewed(
+                repo=str(repo), base="main", head="feature",
+                design_doc_id=str(doc), quote="anything",
+                requirements=[("x", "src/app.py:1")]))
+        self.assertIn("empty", str(ctx.exception))
+
     def test_a_quote_in_a_comment_counts_as_part_of_the_design(self):
         self.serve_design("A short body.", comments=["We decided to cap depth at three."])
         repo = make_repo(self.tmp, CLEAN_FILES)
