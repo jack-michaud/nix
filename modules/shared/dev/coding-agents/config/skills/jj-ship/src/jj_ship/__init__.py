@@ -547,6 +547,32 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
     return {**pr, "url": url, "created": True}
 
 
+
+def _assert_tokens_match_pr_head(attestations: Optional[list[str]], info: dict) -> None:
+    """Every token must be bound to the commit GitHub currently shows as the head.
+
+    Verification already checks the token against the diff, but it computes that
+    diff from a revision the CALLER supplied. If the caller names a ref that has
+    moved, both sides can agree with each other and disagree with the PR. On
+    jack-michaud/nix#27 that produced a trailer asserting a review of round 2
+    while the tokens were bound to round 1. This asks GitHub instead, which is
+    the only party with no stake in the answer.
+    """
+    pr_head = (info or {}).get("headRefOid")
+    if not pr_head or not attestations:
+        return
+    attest = _attest()
+    for token in attestations:
+        bound = (attest.decode(token) or {}).get("head_sha")
+        if bound and bound != pr_head:
+            raise JjShipError(
+                f"refusing to mark PR #{info.get('number')} ready: a "
+                f"{attest.decode(token).get('claim')} attestation is bound to "
+                f"{bound[:12]}, but the PR head is {pr_head[:12]}. The PR moved "
+                f"after the claim was made, so the claim is about different code. "
+                f"Re-attest against {pr_head[:12]} and try again.")
+
+
 async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
                      head: Optional[str] = None, base: Optional[str] = None,
                      attestations: Optional[list[str]] = None) -> dict:
@@ -559,12 +585,13 @@ async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
     trailer naming a stale token would be worse than none.
     """
     view = await _gh(["pr", "view", *_pr_arg(pr), "--json",
-                      "number,url,body,headRefName,baseRefName,isDraft"], repo=repo)
+                      "number,url,body,headRefName,baseRefName,isDraft,headRefOid"], repo=repo)
     info = json.loads(view["out"])
     token_ids = await _verify_attestations(
         attestations, repo, base or info.get("baseRefName"),
         head or info.get("headRefName"), "to mark a PR ready for review",
         body=info.get("body") or "")
+    _assert_tokens_match_pr_head(attestations, info)
     number = str(info["number"])
     body = _with_trailer(info.get("body") or "", token_ids)
     await update_body(number, body, repo=repo)

@@ -436,13 +436,74 @@ async def _git(repo: str, *args: str, check: bool = True) -> dict:
     return await _exec(["git", "--git-dir", await _git_dir(repo), *args], check=check)
 
 
-async def _rev(repo: str, name: str) -> str:
-    """Resolve a revision to a commit id, falling back to its remote-tracking ref.
+async def _head_anchor(repo: str, head: str) -> tuple[str, str]:
+    """Resolve a PR's head to a commit, verifying local and remote agree. (sha, how).
 
-    The fallback matters for the shipping path: a bookmark that has been pushed
-    but whose local git ref jj has not exported yet still resolves as
-    `origin/<name>`.
+    `_base_anchor` has anchored the BASE on the remote since the fay-service
+    incident; the HEAD never got the same discipline, and jack-michaud/nix#27 is
+    what that asymmetry costs. `head='peer-bus-reach-fix'` resolved the local ref,
+    which was a round behind `origin/peer-bus-reach-fix`. The review had been done
+    against the remote. So a token was minted saying round 2 was reviewed while it
+    was bound to round 1, and only ship_check noticed.
+
+    A ref is a legitimate input - requiring a sha makes the safe path inconvenient,
+    and an inconvenient safe path gets worked around. So resolve the ref, but fetch
+    first and refuse to choose when the two sides disagree: "your local X is 1
+    behind origin/X" is the sentence that would have prevented #27.
+
+    The failing-while-correct cases are handled rather than hard-failed, because a
+    gate that blocks a legitimate workflow gets disabled, and a disabled gate is
+    worse than none:
+      * an explicit sha            - nothing to be stale against, taken as given;
+      * no origin remote           - the local ref is the only meaning it has;
+      * a ref that exists only locally, with origin present but no such branch -
+        an unpushed change is normal; it is measured as-is and SAID so;
+      * a ref that exists only on the remote - the documented jj case where a
+        bookmark is pushed before git exports it locally.
+    Set ATTEST_SKIP_FETCH=1 to skip the network call when offline; the resolution
+    still compares whatever refs exist.
     """
+    if _looks_like_sha(head):
+        r = await _git(repo, "rev-parse", "--verify", f"{head}^{{commit}}", check=False)
+        if r["code"] == 0:
+            return r["out"].strip(), "explicit sha"
+    if os.environ.get("ATTEST_SKIP_FETCH") != "1":
+        await _git(repo, "fetch", "--quiet", "origin", head, check=False)
+    local = await _git(repo, "rev-parse", "--verify", f"refs/heads/{head}^{{commit}}",
+                       check=False)
+    remote = await _git(repo, "rev-parse", "--verify",
+                        f"refs/remotes/origin/{head}^{{commit}}", check=False)
+    if local["code"] != 0 and remote["code"] != 0:
+        raise AttestError(
+            f"cannot resolve the head {head!r} in {repo} (tried 'refs/heads/{head}' "
+            f"and 'refs/remotes/origin/{head}'). Attest AFTER committing, so the "
+            f"bookmark points at a real commit.")
+    if local["code"] != 0:
+        return remote["out"].strip(), f"origin/{head} (not exported locally)"
+    local_sha = local["out"].strip()
+    if remote["code"] != 0:
+        origin = await _git(repo, "remote", "get-url", "origin", check=False)
+        how = f"local {head}" + ("" if origin["code"] == 0 else " (no origin remote)")
+        return local_sha, how + (" (unpushed)" if origin["code"] == 0 else "")
+    remote_sha = remote["out"].strip()
+    if local_sha == remote_sha:
+        return local_sha, f"{head} (local == origin)"
+    behind = (await _git(repo, "merge-base", "--is-ancestor", local_sha, remote_sha,
+                         check=False))["code"] == 0
+    ahead = (await _git(repo, "merge-base", "--is-ancestor", remote_sha, local_sha,
+                        check=False))["code"] == 0
+    how = "behind" if behind else "ahead of" if ahead else "diverged from"
+    raise AttestError(
+        f"refusing to attest {head!r} in {repo}: your local {head} ({local_sha[:12]}) "
+        f"is {how} origin/{head} ({remote_sha[:12]}), so the commit you are about to "
+        f"bind a claim to may not be the one under review - that is exactly how "
+        f"jack-michaud/nix#27 got a token for the wrong round. Reconcile them "
+        f"(`jj git fetch`, or `git update-ref refs/heads/{head} {remote_sha[:12]}`), "
+        f"or pass head='<sha>' to state which commit you mean.")
+
+
+async def _rev(repo: str, name: str) -> str:
+    """Back-compat shim: resolve a revision, without the head freshness check."""
     for candidate in (name, f"origin/{name}"):
         r = await _git(repo, "rev-parse", "--verify", f"{candidate}^{{commit}}",
                        check=False)
@@ -529,11 +590,11 @@ async def resolve_diff(repo: str, base: str, head: str) -> dict[str, Any]:
     recorded in the token and can be audited afterwards.
     """
     base_sha, base_how = await _base_anchor(repo, base)
-    head_sha = await _rev(repo, head)
+    head_sha, head_how = await _head_anchor(repo, head)
     merge_base = (await _git(repo, "merge-base", base_sha, head_sha))["out"].strip()
     diff = (await _git(repo, "diff", *_DIFF_FLAGS, merge_base, head_sha))["out"]
     return {"base": base, "base_sha": base_sha, "base_how": base_how, "head": head,
-            "head_sha": head_sha, "merge_base": merge_base, "diff": diff,
+            "head_sha": head_sha, "head_how": head_how, "merge_base": merge_base, "diff": diff,
             "diff_sha": hashlib.sha256(diff.encode()).hexdigest()}
 
 
