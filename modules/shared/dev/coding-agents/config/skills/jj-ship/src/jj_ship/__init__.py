@@ -429,12 +429,15 @@ def _attest():
 
 
 async def _verify_attestations(attestations: Optional[list[str]], repo: str,
-                               base: Optional[str], head: str,
-                               what: str) -> list[str]:
+                               base: Optional[str], head: str, what: str,
+                               body: Optional[str] = None) -> list[str]:
     """Verify `attestations` against the diff about to be pushed; return token ids.
 
     `base` defaults to the repo's default branch, matching what GitHub will diff
-    the PR against.
+    the PR against. `body` is the description about to be posted, which only
+    this function can see - attest's `description_humanized` claim is bound to
+    its hash, so handing it over is what makes that claim about the text a
+    reviewer will actually read rather than about some text, once.
     """
     attest = _attest()
     base = base or await _default_branch(repo=repo)
@@ -445,7 +448,7 @@ async def _verify_attestations(attestations: Optional[list[str]], repo: str,
             f"base='<branch>'.")
     try:
         sha = await attest.diff_sha(repo, base, head)
-        payloads = attest.verify(attestations or [], sha)
+        payloads = attest.verify(attestations or [], sha, body=body)
     except attest.AttestError as exc:
         raise JjShipError(f"refusing {what}: {exc}") from exc
     return [attest.token_id(t) for t in (attestations or [])]
@@ -523,7 +526,7 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
     # Before the idempotent early return, so a second call is held to the same bar.
     if not draft:
         token_ids = await _verify_attestations(
-            attestations, repo, base, head, "to open a non-draft PR")
+            attestations, repo, base, head, "to open a non-draft PR", body=body)
         body = _with_trailer(body, token_ids)
     existing = await find_pr(repo=repo, head=head)
     if existing and existing.get("state") == "OPEN":
@@ -560,7 +563,8 @@ async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
     info = json.loads(view["out"])
     token_ids = await _verify_attestations(
         attestations, repo, base or info.get("baseRefName"),
-        head or info.get("headRefName"), "to mark a PR ready for review")
+        head or info.get("headRefName"), "to mark a PR ready for review",
+        body=info.get("body") or "")
     number = str(info["number"])
     body = _with_trailer(info.get("body") or "", token_ids)
     await update_body(number, body, repo=repo)

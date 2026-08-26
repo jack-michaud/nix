@@ -246,6 +246,8 @@ def pull_request(slug: str, number: Any) -> dict[str, Any]:
     raw = _gh_json(["api", f"repos/{slug}/pulls/{int(number)}"])
     return {
         "body": raw.get("body") or "",
+        # When the PR was opened: it decides which claims it had to carry.
+        "created_at": raw.get("created_at") or "",
         "base": ((raw.get("base") or {}).get("ref") or ""),
         "head": ((raw.get("head") or {}).get("ref") or ""),
         "head_sha": ((raw.get("head") or {}).get("sha") or ""),
@@ -346,8 +348,15 @@ def verify_pr(slug: str, number: Any, pr: Optional[dict[str, Any]] = None) -> di
 
     `{"url", "slug", "number", "ok", "reason", "token_ids", "claims"}`. `ok` is
     True only when a trailer in the BODY names ids that all resolve to issued
-    claims, those claims cover `attest.REQUIRED_CLAIMS`, and every one of them
-    still binds to the diff the PR shows.
+    claims, those claims cover the set `attest.required_claims()` demanded when
+    this PR was OPENED, and every one of them still binds to the diff the PR
+    shows.
+
+    The required set is resolved from the PR's `created_at`, not from now. Both
+    this module and `jj_ship` read it at call time, so a claim added to the
+    tuple would otherwise fail every trailer already stamped - merged PRs
+    included - the moment the new code deployed. That is a fleet outage with a
+    delay fuse, and it is the reason the epoch exists.
     """
     attest = _attest()
     owner, _, name = slug.partition("/")
@@ -383,10 +392,14 @@ def verify_pr(slug: str, number: Any, pr: Optional[dict[str, Any]] = None) -> di
               "cannot be honoured - the trailer is forged or was written by hand")
         return verdict
     verdict["claims"] = sorted({str(record.get("claim")) for record in records.values()})
-    missing = [claim for claim in attest.REQUIRED_CLAIMS if claim not in verdict["claims"]]
+    required = attest.required_claims(at=pr.get("created_at") or None)
+    verdict["required"] = list(required)
+    missing = [claim for claim in required if claim not in verdict["claims"]]
     if missing:
-        verdict["reason"] = ("the trailer's attestations do not cover the required "
-                             "claim(s): " + ", ".join(missing))
+        verdict["reason"] = ("the trailer's attestations do not cover the claim(s) "
+                             "required when this PR was opened"
+                             + (f" ({pr['created_at']})" if pr.get("created_at") else "")
+                             + ": " + ", ".join(missing))
         return verdict
     for token_id in token_ids:
         failure = _binding_failure(records[token_id], pr)

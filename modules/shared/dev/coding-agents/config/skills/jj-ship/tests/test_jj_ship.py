@@ -369,7 +369,9 @@ elif argv[:2] == ["pr", "create"]:
     print("https://github.com/o/r/pull/1")
 elif argv[:2] == ["pr", "view"]:
     print(json.dumps({"number": 1, "url": "https://github.com/o/r/pull/1",
-                      "body": "**Original body.**", "headRefName": "feature",
+                      "body": "*Authored by an agent on behalf of Jack "
+                              "(@jack-michaud).*\n\n**Original body.**",
+                      "headRefName": "feature",
                       "baseRefName": "main", "isDraft": True}))
 elif argv[:2] == ["pr", "edit"]:
     # Real gh (<= 2.69.0) cannot do this at all: it asks GraphQL for
@@ -392,6 +394,13 @@ else:
     sys.stderr.write("unexpected: %r\n" % (argv,))
     sys.exit(9)
 """
+
+
+# Both carry the agent-authorship disclosure, because attest's third claim binds
+# the hash of the body that gets posted and adds that line when it is missing -
+# so a fixture body without it would be attested as a body it is not.
+BODY = attest.DISCLOSURE_LINE + "\n\n**Body.**"
+VIEWED_BODY = attest.DISCLOSURE_LINE + "\n\n**Original body.**"
 
 
 def _git(repo, *args):
@@ -477,25 +486,31 @@ class AttestationEnforcementTest(unittest.TestCase):
         return [json.loads(line)["payload"]["body"]
                 for line in log.read_text().strip().split("\n") if line]
 
-    def tokens(self):
-        """Both required claims, signed against the current diff.
+    def tokens(self, body: str = None):
+        """Every required claim, signed against the current diff and `body`.
 
-        Signed directly rather than through design_reviewed(): that function's
+        design_reviewed is signed directly rather than run: that function's
         Linear fetch and quote/path matching are covered by the attest suite,
         while what jj-ship owns is refusing a PR whose tokens do not match.
+        description_humanized IS run, because it is the one claim that binds
+        something only jj-ship can see - the body about to be posted - and a
+        hand-minted token would not exercise that.
         """
         sha = _run(attest.diff_sha(str(self.repo), "main", "feature"))
+        described = _run(attest.description_humanized(
+            str(self.repo), "main", "feature", BODY if body is None else body))
         return [
             str(attest._issue("design_reviewed", sha, str(self.repo), "main",
                               "feature", "ENG-1", "q" * 64, 1, {})),
             str(_run(attest.eval_passed(str(self.repo), "main", "feature"))),
+            str(described),
         ]
 
     # -- refusals ---------------------------------------------------------
 
     def test_a_non_draft_pr_without_attestations_names_every_missing_claim(self):
         with self.assertRaises(jj_ship.JjShipError) as ctx:
-            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+            _run(jj_ship.open_pr("T", body=BODY, repo=str(self.repo),
                                  head="feature"))
         message = str(ctx.exception)
         self.assertIn("missing attestation(s)", message)
@@ -506,7 +521,7 @@ class AttestationEnforcementTest(unittest.TestCase):
     def test_one_claim_short_names_only_the_missing_one(self):
         both = self.tokens()
         with self.assertRaises(jj_ship.JjShipError) as ctx:
-            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+            _run(jj_ship.open_pr("T", body=BODY, repo=str(self.repo),
                                  head="feature", attestations=[both[1]]))
         self.assertIn("design_reviewed", str(ctx.exception))
 
@@ -515,17 +530,30 @@ class AttestationEnforcementTest(unittest.TestCase):
         (self.repo / "app.py").write_text("value = 2\n")
         _git(self.repo, "commit", "-aqm", "one more edit")
         with self.assertRaises(jj_ship.JjShipError) as ctx:
-            _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+            _run(jj_ship.open_pr("T", body=BODY, repo=str(self.repo),
                                  head="feature", attestations=tokens))
         message = str(ctx.exception)
         self.assertIn("attestation is bound to a different diff - re-run the "
                       "verification after your last edit", message)
         self.assertNotIn(["pr", "create"], [c[:2] for c in self.gh_calls()])
 
+    def test_a_body_edited_after_attestation_is_refused(self):
+        """The description claim binds the TEXT, not the fact that some text was
+        humanized once. Editing the body after attesting voids it, exactly like
+        editing the code does - this is the only point where the body a reviewer
+        will read and the body that was checked can be compared."""
+        tokens = self.tokens()
+        with self.assertRaises(jj_ship.JjShipError) as ctx:
+            _run(jj_ship.open_pr("T", body=BODY + "\n\nAnd a paragraph nobody read.",
+                                 repo=str(self.repo), head="feature",
+                                 attestations=tokens))
+        self.assertIn("bound to a different body", str(ctx.exception))
+        self.assertNotIn(["pr", "create"], [c[:2] for c in self.gh_calls()])
+
     # -- what is allowed --------------------------------------------------
 
     def test_a_draft_needs_no_attestation(self):
-        result = _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+        result = _run(jj_ship.open_pr("T", body=BODY, repo=str(self.repo),
                                       head="feature", draft=True))
         self.assertTrue(result["created"])
         create = next(c for c in self.gh_calls() if c[:2] == ["pr", "create"])
@@ -535,7 +563,7 @@ class AttestationEnforcementTest(unittest.TestCase):
 
     def test_valid_attestations_open_the_pr_and_stamp_the_trailer(self):
         tokens = self.tokens()
-        result = _run(jj_ship.open_pr("T", body="**Body.**", repo=str(self.repo),
+        result = _run(jj_ship.open_pr("T", body=BODY, repo=str(self.repo),
                                       head="feature", attestations=tokens))
         self.assertTrue(result["created"])
         body = self.created_body()
@@ -547,7 +575,9 @@ class AttestationEnforcementTest(unittest.TestCase):
             self.assertNotIn(token, body)
 
     def test_mark_ready_refuses_without_attestations_and_accepts_with_them(self):
-        tokens = self.tokens()
+        # VIEWED_BODY, not BODY: mark_ready verifies against the body the PR
+        # already has, which is what it is about to re-post with the trailer.
+        tokens = self.tokens(VIEWED_BODY)
         with self.assertRaises(jj_ship.JjShipError) as ctx:
             _run(jj_ship.mark_ready(1, repo=str(self.repo)))
         self.assertIn("missing attestation(s)", str(ctx.exception))
@@ -564,7 +594,8 @@ class AttestationEnforcementTest(unittest.TestCase):
         """`gh pr edit --body` exits 1 against real GitHub, so using it at all
         is the bug. The fake gh fails that subcommand exactly as the real one
         does, so this asserts the write goes somewhere that works."""
-        _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=self.tokens()))
+        _run(jj_ship.mark_ready(1, repo=str(self.repo),
+                                attestations=self.tokens(VIEWED_BODY)))
         self.assertNotIn(["pr", "edit"], [c[:2] for c in self.gh_calls()])
         patch = next(c for c in self.gh_calls() if c[:2] == ["api", "--method"])
         self.assertEqual(patch[:3], ["api", "--method", "PATCH"])
@@ -587,7 +618,7 @@ class AttestationEnforcementTest(unittest.TestCase):
     # re-attest until something sticks.
 
     def test_an_honest_token_is_still_accepted_when_the_local_base_ref_is_stale(self):
-        tokens = self.tokens()
+        tokens = self.tokens(VIEWED_BODY)
         _git(self.repo, "update-ref", "refs/heads/main", self.stale_main)
         result = _run(jj_ship.mark_ready(1, repo=str(self.repo), attestations=tokens))
         self.assertTrue(result["ready"])
