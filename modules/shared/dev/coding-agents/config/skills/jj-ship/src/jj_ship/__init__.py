@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+import hashlib
+import sys
 import os
 import re
 import shutil
@@ -471,10 +474,94 @@ def _with_trailer(body: str, token_ids: list[str]) -> str:
     return (body.rstrip() + "\n\n" + trailer + "\n") if body.strip() else trailer + "\n"
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+_SHIP_LISTENERS: list[Any] = []
+
+HUMANIZER_STATES = ("not_invoked", "ran_changed", "ran_unchanged", "unknown")
+
+
+def on_ship(callback: Any) -> Any:
+    """Register a callback invoked once per posted PR body. Returns it, so it can decorate.
+
+    jj-ship deliberately knows nothing about who listens: no path, no import, no
+    config key naming a consumer. With an empty listener set this whole mechanism
+    costs one function call and changes nothing.
+    """
+    if callback not in _SHIP_LISTENERS:
+        _SHIP_LISTENERS.append(callback)
+    return callback
+
+
+def off_ship(callback: Any) -> None:
+    if callback in _SHIP_LISTENERS:
+        _SHIP_LISTENERS.remove(callback)
+
+
+def _humanizer_state(provenance: dict) -> str:
+    """Classify what the humanizer did, and refuse to invent a negative.
+
+    Absence of information is not evidence that the humanizer did not run. A
+    caller that says nothing gets "unknown", never "not_invoked" - guessing there
+    would teach a dataset built from these rows exactly the wrong lesson.
+    """
+    declared = (provenance or {}).get("humanizer")
+    if declared in HUMANIZER_STATES:
+        return declared
+    raw, human = (provenance or {}).get("raw_body"), (provenance or {}).get("humanized_body")
+    if raw is not None and human is not None:
+        return "ran_changed" if raw != human else "ran_unchanged"
+    return "unknown"
+
+
+def _emit_ship_event(event: dict) -> None:
+    """Fan out to listeners.
+
+    A listener that raises is reported and swallowed: a broken consumer of this
+    information must never be able to fail the ship it is observing.
+    """
+    for listener in list(_SHIP_LISTENERS):
+        try:
+            listener(dict(event))
+        except Exception as exc:
+            print(f"[jj_ship] ship listener {getattr(listener, '__name__', listener)!r} "
+                  f"raised {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _ship_event(*, action: str, repo: str, info: dict, body: str,
+                token_ids: list[str], head: Optional[str] = None,
+                base: Optional[str] = None, provenance: Optional[dict] = None) -> dict:
+    """Build the event: what jj-ship can prove, plus what only the caller knows.
+
+    Everything up to `attestation_ids` is observed here - the body it actually
+    posted and the identifiers around it. `raw_body`, `humanized_body` and `agent`
+    happen upstream, before jj-ship is invoked, so they are recorded verbatim from
+    `provenance` and never inferred.
+    """
+    p = provenance or {}
+    return {
+        "v": 1, "action": action, "at": _now_iso(),
+        "repo": str(Path(repo).resolve()),
+        "pr": info.get("number"), "url": info.get("url"),
+        "head": head or info.get("headRefName"), "head_sha": info.get("headRefOid"),
+        "base": base or info.get("baseRefName"),
+        "posted_body": body,
+        "body_sha": hashlib.sha256((body or "").encode()).hexdigest(),
+        "attestation_ids": list(token_ids or []),
+        "raw_body": p.get("raw_body"),
+        "humanized_body": p.get("humanized_body"),
+        "humanizer": _humanizer_state(p),
+        "agent": p.get("agent"),
+    }
+
+
 async def open_pr(title: str, body: str = "", repo: str = ".",
                   head: Optional[str] = None, base: Optional[str] = None,
                   draft: bool = False, skip_wrap_check: bool = False,
-                  attestations: Optional[list[str]] = None) -> dict:
+                  attestations: Optional[list[str]] = None,
+                  provenance: Optional[dict] = None) -> dict:
     """Open a PR for the pushed bookmark, or return the existing one (idempotent).
 
     A non-draft PR requires `attestations=[...]` carrying every claim in
@@ -523,6 +610,7 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
             f"refusing to open a PR from {head!r}, the repo's default branch - "
             f"the working copy has probably moved off the feature bookmark "
             f"(e.g. after `jj new {default}`). Pass head='<bookmark>' explicitly.")
+    token_ids: list[str] = []
     # Before the idempotent early return, so a second call is held to the same bar.
     if not draft:
         token_ids = await _verify_attestations(
@@ -544,7 +632,17 @@ async def open_pr(title: str, body: str = "", repo: str = ".",
         raise JjShipError(f"gh pr create failed: {r['err'] or r['out']}")
     url = r["out"].strip().splitlines()[-1]
     pr = await find_pr(repo=repo, head=head) or {}
-    return {**pr, "url": url, "created": True}
+    result = {**pr, "url": url, "created": True}
+    if _SHIP_LISTENERS:
+        detail = await _gh(["pr", "view", str(pr.get("number") or url), "--json",
+                            "number,url,headRefName,baseRefName,headRefOid"],
+                           repo=repo, check=False)
+        info = json.loads(detail["out"]) if detail["code"] == 0 and detail["out"] else dict(result)
+        # head_sha from GitHub, not from the ref the caller named.
+        _emit_ship_event(_ship_event(action="open_pr", repo=repo, info=info, body=body,
+                                     token_ids=token_ids if not draft else [],
+                                     head=head, base=base, provenance=provenance))
+    return result
 
 
 
@@ -575,7 +673,8 @@ def _assert_tokens_match_pr_head(attestations: Optional[list[str]], info: dict) 
 
 async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
                      head: Optional[str] = None, base: Optional[str] = None,
-                     attestations: Optional[list[str]] = None) -> dict:
+                     attestations: Optional[list[str]] = None,
+                     provenance: Optional[dict] = None) -> dict:
     """Take a draft PR out of draft, which requires the same attestations as
     opening a non-draft one: draft -> ready is the moment a human is asked to
     read it, and that is what the claims are about.
@@ -595,6 +694,9 @@ async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
     number = str(info["number"])
     body = _with_trailer(info.get("body") or "", token_ids)
     await update_body(number, body, repo=repo)
+    _emit_ship_event(_ship_event(action="mark_ready", repo=repo, info=info, body=body,
+                                 token_ids=token_ids, head=head, base=base,
+                                 provenance=provenance))
     r = await _gh(["pr", "ready", number], repo=repo, check=False)
     if r["code"] != 0 and "already" not in (r["err"] + r["out"]).lower():
         raise JjShipError(f"gh pr ready failed: {r['err'] or r['out']}")

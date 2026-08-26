@@ -138,6 +138,34 @@ existing call site keeps working and only the non-draft path raises. Read
 tamper-proof, and the load-bearing part is the verification work, not the
 signature.
 
+## Ship events
+
+A consumer that wants to know what was posted registers a callback. jj-ship knows
+nothing about who listens — no path, no import, no config key naming a consumer.
+With no listeners registered this costs one function call and changes nothing.
+
+```python
+@jj_ship.on_ship
+def record(event):            # called once per posted body
+    ...                       # event["posted_body"], ["body_sha"], ["pr"], ["head_sha"], ...
+```
+
+The event carries what jj-ship can **prove**: the body it actually posted, its sha,
+repo, PR number, url, head_sha (re-read from GitHub, not from the ref you named),
+base, bookmark, and the attestation ids. What it cannot see — the text before a
+rewrite, and whether a humanizer ran — is caller-supplied and recorded verbatim:
+
+```python
+await jj_ship.open_pr(..., provenance={"raw_body": raw, "humanized_body": final})
+```
+
+`event["humanizer"]` is one of `not_invoked | ran_changed | ran_unchanged | unknown`.
+It is derived only when both bodies are supplied; **a caller who says nothing gets
+`unknown`, never `not_invoked`** — absence of a signal is not evidence of a negative,
+and guessing there would teach a dataset built from these rows the wrong lesson.
+
+A listener that raises is reported to stderr and never breaks the ship.
+
 ## Stacked PRs
 
 `ship()` and `open_pr()` take `base=`, so a stack works - but the mechanics are
