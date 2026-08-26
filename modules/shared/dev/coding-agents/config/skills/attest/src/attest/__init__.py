@@ -1,10 +1,12 @@
 """attest: signed, diff-bound attestations for the shipping path.
 
-Two verification functions - `design_reviewed()` and `eval_passed()` - each do
-real work, bind their result to the exact diff they inspected, and return an
-opaque token. `jj_ship.open_pr()` / `jj_ship.mark_ready()` refuse to create a
-non-draft PR without both tokens, and recompute the diff hash from the tree jj
-is about to push before accepting them.
+Three verification functions - `design_reviewed()`, `eval_passed()` and
+`description_humanized()` - each do real work, bind their result to the exact
+diff they inspected, and return an opaque token. `jj_ship.open_pr()` /
+`jj_ship.mark_ready()` refuse to create a non-draft PR without all three tokens,
+and recompute the diff hash from the tree jj is about to push - and, for the
+description claim, the hash of the body it is about to post - before accepting
+them.
 
 What the signature buys, precisely (see SKILL.md for the long version):
 
@@ -28,12 +30,15 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import importlib
+import importlib.util
 import json
 import os
 import re
 import secrets
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -74,6 +79,14 @@ DEFAULT_THRESHOLDS: dict[str, Any] = {
     "comment_lines_floor": 6,
     # Zero: a test that reaches inside the unit it tests goes stale silently.
     "patching_calls_max": 0,
+    # jack-michaud/nix#27 was ~13000 characters and was refused unread.
+    "description_chars_max": 6000,
+    # The humanizer's own 0..1 score, 1 = worst. Permissive: this gate auto-fixes.
+    "description_slop_score_max": 0.5,
+    # Below this nothing is scored: a score alone punishes brevity (see SKILL.md).
+    "description_short_chars": 800,
+    # null = computed and logged but NEVER required. See required_claims().
+    "description_claim_required_since": None,
 }
 
 
@@ -113,7 +126,60 @@ def _key() -> bytes:
 # tokens
 # ---------------------------------------------------------------------------
 
-REQUIRED_CLAIMS = ("design_reviewed", "eval_passed")
+BASE_CLAIMS = ("design_reviewed", "eval_passed")
+DESCRIPTION_CLAIM = "description_humanized"
+
+# The PRE-epoch set, for callers written before `required_claims()`. Deliberately
+# the smaller one: a stale reader under-requires, which cannot refuse a good ship.
+REQUIRED_CLAIMS = BASE_CLAIMS
+
+
+def _as_timestamp(value: Any) -> Optional[float]:
+    """A unix timestamp from a number or an ISO-8601 string, or None.
+
+    GitHub hands out `2026-08-25T19:16:12Z`; a caller in-process has a float.
+    Both mean the same instant and both have to work, because one of them is
+    what decides whether an already-merged PR is still valid.
+    """
+    if value is None or value == "" or value is False:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise AttestError(
+            f"cannot read {text!r} as a time: expected an ISO-8601 instant like "
+            f"'2026-09-01T00:00:00Z' or a unix timestamp")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def required_claims(at: Any = None) -> tuple[str, ...]:
+    """The claims a ship must carry for something that happened at `at`.
+
+    An EPOCH, not a flag day, because `REQUIRED_CLAIMS` is read at call time by
+    `jj_ship` and by `ship_check` alike - so adding a claim to a bare tuple
+    retroactively invalidates the trailer on every PR already shipped, including
+    merged ones. `ship_check` passes the PR's `created_at`, so a PR is judged by
+    what was required when it was opened; `verify()` passes nothing and gets
+    now, because a ship happening now is happening now.
+
+    `description_claim_required_since` in the thresholds file is that epoch, and
+    `null` (the default) means the description claim is never required anywhere:
+    it is computed, logged and ignored. See SKILL.md - the scorer's ability to
+    tell slop from length is under test, and until that settles this check must
+    not be able to block a ship on any machine.
+    """
+    since = _as_timestamp(thresholds()["description_claim_required_since"])
+    if since is None:
+        return BASE_CLAIMS
+    when = time.time() if at is None else _as_timestamp(at)
+    if when is None or when < since:
+        return BASE_CLAIMS
+    return BASE_CLAIMS + (DESCRIPTION_CLAIM,)
 
 
 class Token(str):
@@ -150,7 +216,9 @@ def _issue(claim: str, diff_sha: str, repo: str, base: str, head: str,
            doc_id: Optional[str], quote_sha: Optional[str],
            requirements_n: int, report: dict[str, Any], *,
            base_sha: Optional[str] = None, merge_base: Optional[str] = None,
-           head_sha: Optional[str] = None) -> Token:
+           head_sha: Optional[str] = None, body_sha: Optional[str] = None,
+           passed: Optional[bool] = None,
+           degraded: Optional[bool] = None) -> Token:
     # base_sha/merge_base/head_sha are recorded, not just used: `base` is a
     # branch NAME, and a name is not evidence of what was measured. An audit of
     # attest.log.jsonl can now tell whether a claim was bound to the merge base
@@ -164,6 +232,13 @@ def _issue(claim: str, diff_sha: str, repo: str, base: str, head: str,
         "merge_base": merge_base,
         "head_sha": head_sha,
         "head": head,
+        # None, not absent, on the other two claims: an audit can then tell
+        # "no body was measured" from "this token predates the field".
+        "body_sha": body_sha,
+        # False = issued while advisory and did not pass; kept as evidence.
+        "passed": passed,
+        # None = inference never entered the picture; see description_humanized.
+        "degraded": degraded,
         "doc_id": doc_id,
         "quote_sha": quote_sha,
         "requirements_n": requirements_n,
@@ -220,12 +295,27 @@ def decode(token: str) -> dict[str, Any]:
 
 
 def verify(tokens: Iterable[str], diff_sha: str,
-           required: Iterable[str] = REQUIRED_CLAIMS) -> dict[str, dict[str, Any]]:
-    """Check `tokens` against the diff that is actually about to be shipped.
+           required: Optional[Iterable[str]] = None,
+           body: Optional[str] = None) -> dict[str, dict[str, Any]]:
+    """Check `tokens` against the diff - and body - actually about to be shipped.
 
     Every required claim must be present, every token's HMAC must verify, and
     every token's `diff_sha` must equal `diff_sha`. Returns {claim: payload}.
+
+    `required` defaults to `required_claims()` resolved HERE rather than to a
+    tuple bound at import: which claims a ship needs is a runtime question with
+    an epoch behind it, and a default argument would freeze the answer at the
+    moment this module was first imported.
+
+    `body`, when given, is the PR description about to be posted, and the
+    `description_humanized` token's `body_sha` must equal its canonical hash.
+    Without it the claim would be a claim about *some* text, which is theatre:
+    the caller that posts the body is the only one that knows what it posts, so
+    it is the caller that has to hand it over. Passing None skips only that
+    comparison; a caller that cannot see the body (an audit reading the log,
+    say) still gets the diff binding.
     """
+    required = required_claims() if required is None else required
     payloads: dict[str, dict[str, Any]] = {}
     for token in tokens or []:
         payload = decode(token)
@@ -237,6 +327,25 @@ def verify(tokens: Iterable[str], diff_sha: str,
                 f"  attested:   {payload['diff_sha']}\n"
                 f"  about to push: {diff_sha}")
         payloads[payload["claim"]] = payload
+    described = payloads.get(DESCRIPTION_CLAIM)
+    if body is not None and described:
+        posted = body_sha(body)
+        if described.get("body_sha") != posted:
+            raise AttestError(
+                f"the description attestation is bound to a different body - "
+                f"the text was edited after it was humanized, so re-run "
+                f"attest.description_humanized() on the body you are posting\n"
+                f"  attested:  {described.get('body_sha')}\n"
+                f"  about to post: {posted}\n"
+                f"(the `Shipped-With:` trailer and line endings are excluded "
+                f"from this hash; nothing else is)")
+    if described is not None and DESCRIPTION_CLAIM in required \
+            and described.get("passed") is False:
+        raise AttestError(
+            "the description attestation was issued while the claim was "
+            "advisory and it did NOT pass, so it cannot satisfy the claim now "
+            "that it is required. Re-run attest.description_humanized() on the "
+            "body you are posting and fix what it reports.")
     missing = [claim for claim in required if claim not in payloads]
     if missing:
         raise AttestError(
@@ -845,18 +954,423 @@ async def design_reviewed(repo: str, base: str, head: str, design_doc_id: str,
 
 
 # ---------------------------------------------------------------------------
+# description_humanized
+# ---------------------------------------------------------------------------
+
+DISCLOSURE_LINE = "*Authored by an agent on behalf of Jack (@jack-michaud).*"
+
+# Tolerant: the policy fixes that an artifact says an agent wrote it on someone's
+# behalf, not the wording (a stricter match would stack a second disclosure).
+_DISCLOSURE_RE = re.compile(
+    r"agent\b[^\n]{0,80}\bon behalf of\b|\bon behalf of\b[^\n]{0,80}\bagent\b",
+    re.IGNORECASE)
+
+_TRAILER_RE = re.compile(r"(?m)^Shipped-With:.*$")
+
+DEFAULT_HUMANIZER_PATH = (Path.home() / ".prime" / "agent" / "ceo-console" /
+                          "humanizer" / "humanizer.py")
+
+_DESCRIPTION_THRESHOLDS = ("description_chars_max", "description_slop_score_max",
+                           "description_short_chars")
+
+
+def canonical_body(text: str) -> str:
+    """The bytes a body hash is taken over. Three normalisations, each earned:
+
+    * the `Shipped-With:` trailer is removed, because `jj_ship` appends it
+      AFTER this token exists - the trailer names the token - so a hash that
+      covered it could never match anything;
+    * `\r\n` becomes `\n`, because GitHub hands bodies back CRLF-terminated
+      and `mark_ready()` re-posts the body it just read;
+    * leading and trailing whitespace goes, because `gh` and the REST API
+      disagree about the final newline.
+
+    Everything else is content and is hashed exactly as written.
+    """
+    return _TRAILER_RE.sub("", (text or "").replace("\r\n", "\n")).strip()
+
+
+def body_sha(text: str) -> str:
+    """sha256 of `canonical_body(text)` - what the description claim binds to."""
+    return hashlib.sha256(canonical_body(text).encode()).hexdigest()
+
+
+def preserved_trailers(text: str) -> list[str]:
+    """Every `Shipped-With:` line in `text`, byte-exact, in order."""
+    return _TRAILER_RE.findall((text or "").replace("\r\n", "\n"))
+
+
+def has_disclosure(text: str) -> bool:
+    return bool(_DISCLOSURE_RE.search(text or ""))
+
+
+def ensure_disclosure(text: str) -> tuple[str, bool]:
+    """`text` with the agent-authorship line prepended if it has none.
+
+    Added, not refused. The line is fixed boilerplate: adding it cannot make the
+    description claim anything it did not already claim, and failing a ship over
+    a missing constant is friction with no reader on the other end. A missing
+    `Shipped-With:` trailer is the opposite case and does raise - that one
+    carries token IDs nothing here can regenerate.
+    """
+    if has_disclosure(text):
+        return text, False
+    return DISCLOSURE_LINE + "\n\n" + (text or "").lstrip(), True
+
+
+def _load_module_from_file(path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location("attest_humanizer", str(path))
+    if spec is None or spec.loader is None:
+        raise AttestError(f"{path} is not importable as a python module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_humanizer() -> tuple[Any, str]:
+    """The module providing `humanize()`/`score()`, and where it was found.
+
+    Three places, first hit wins: `ATTEST_HUMANIZER` (a module name or a `.py`
+    path), an installed `humanizer` module, then `DEFAULT_HUMANIZER_PATH`.
+
+    Unlike `design_reviewed()`, which deliberately has no injection seam, this
+    lookup is a seam and that is fine: the humanizer is a TOOL, not the
+    evidence. A stub that rewrites nothing still has to produce text this
+    function's caller measures itself - length is counted here, and the hash is
+    taken over what will actually be posted.
+
+    Every failed candidate is reported, because "the humanizer is missing" and
+    "the humanizer is broken" need different fixes and look identical otherwise.
+    """
+    override = os.environ.get("ATTEST_HUMANIZER", "").strip()
+    sources = ([(f"ATTEST_HUMANIZER={override}", override)] if override else
+               [("import humanizer", "humanizer"),
+                (str(DEFAULT_HUMANIZER_PATH), str(DEFAULT_HUMANIZER_PATH))])
+    tried: list[str] = []
+    for how, source in sources:
+        try:
+            module = (_load_module_from_file(Path(source).expanduser())
+                      if source.endswith(".py")
+                      else importlib.import_module(source))
+        except Exception as exc:
+            tried.append(f"{how}: {type(exc).__name__}: {exc}")
+            continue
+        absent = [name for name in ("humanize", "score")
+                  if not callable(getattr(module, name, None))]
+        if absent:
+            tried.append(f"{how}: loaded, but no callable {', '.join(absent)}()")
+            continue
+        return module, how
+    raise AttestError("no humanizer with humanize()/score() could be loaded:\n  "
+                      + "\n  ".join(tried))
+
+
+def _measure(module: Any, text: str) -> dict[str, Any]:
+    """`score()`'s whole dict for `text`: slop_score AND every signal behind it.
+
+    The full vector is kept, not just the number, because the number is what is
+    under question - see SKILL.md. A row that records only `slop_score: 0.76`
+    cannot later answer "was that a length detector wearing a slop costume?",
+    and answering that is the point of logging an advisory claim at all.
+    """
+    try:
+        result = module.score(text)
+        return dict(result) if isinstance(result, dict) else {}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _slop_score(module: Any, text: str) -> Optional[float]:
+    """`score()`'s slop_score for `text`, or None if it could not produce one.
+
+    None is not zero. It means "not measured", and every caller reports it as
+    that rather than letting an unscored description read as a clean one.
+    """
+    value = _measure(module, text).get("slop_score")
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def humanize_body(body: str, context: Optional[dict] = None,
+                  enforce: Optional[bool] = None) -> dict:
+    """Score the description, rewrite it if it needs it, return what to post.
+
+    The policy in one sentence: **rewrite and proceed; refuse only when a
+    description needs a rewrite and cannot get one.** The other two claims have
+    no choice but to refuse - nothing here can review a design or delete a
+    patching call for you - but slop has a mechanical fix, and a gate that
+    blocks shipping over a fixable defect it could have fixed is a gate agents
+    learn to route around. So a refusal is kept for the two cases where
+    proceeding would be a lie: the rewrite could not run, or it ran and the
+    result is still over the line.
+
+    `enforce` decides whether such a case RAISES or is merely RECORDED, and
+    defaults to whether `required_claims()` currently demands this claim. While
+    the claim is advisory the work still happens in full - scored, rewritten,
+    logged with the whole signal vector - and only the refusal is withheld. A
+    silent advisory check would generate no evidence, and evidence is the only
+    thing that can ever justify turning the epoch on.
+
+    The measurements this function reports are its OWN, not the humanizer's.
+    `chars_after` is counted here from the text that will be posted; the
+    humanizer's `metrics` are carried through beside them, unaudited, for
+    comparison. That is what stops a stub humanizer from asserting its way past
+    the length limit.
+
+    Three degraded cases, all decided rather than left to chance:
+
+    * **short** - under `description_short_chars` the description is not scored,
+      not rewritten, not flagged. A score alone punishes brevity, which is the
+      thing this check is supposed to be encouraging.
+    * **no humanizer** - length is still checked here, and the report says the
+      claim covers length only. Over the length limit with no humanizer fails:
+      there is nothing left that could fix it.
+    * **humanizer raises** (no inference, network down) - fails only if the
+      description was flagged. An unflagged description never needed it.
+
+    A rewriter that degrades to "returned the input unchanged, inference
+    unavailable" rather than raising - the sane thing for a rewriter to do - is
+    indistinguishable here from one that tried and could not compress, so the
+    failure quotes the humanizer's own `reason` instead of guessing between them.
+
+    `humanizer_run` is the rewriter's own record of that: `{attempts, succeeded,
+    degraded, failures, duration_ms, attempted_at}`, copied through whole and
+    unaudited. `None` means `humanize()` was never called - under the floor, no
+    humanizer, or already within the limits - which is NOT degradation and must
+    not be logged as any. Only keys this function names are read, so a rewriter
+    may add its own without breaking the gate.
+    """
+    limits = thresholds()
+    enforced = (DESCRIPTION_CLAIM in required_claims()) if enforce is None else enforce
+    text, disclosure_added = ensure_disclosure(body or "")
+    canon = canonical_body(text)
+    report: dict[str, Any] = {
+        "chars_before": len(canonical_body(body or "")),
+        "chars_after": len(canon),
+        "slop_score_before": None,
+        "slop_score_after": None,
+        "signals_before": None,
+        "signals_after": None,
+        "flagged": False,
+        "humanized": False,
+        "passed": True,
+        "enforced": enforced,
+        "failures": [],
+        "disclosure_added": disclosure_added,
+        "preserved": preserved_trailers(text),
+        "humanizer": None,
+        "humanizer_metrics": None,
+        "humanizer_run": None,
+        "reason": "",
+        "body": text,
+        "thresholds": {key: limits[key] for key in _DESCRIPTION_THRESHOLDS},
+        "thresholds_file": str(thresholds_path()) if thresholds_path().is_file() else None,
+    }
+
+    def fail(message: str) -> dict:
+        """Record a failure - and raise it too, but only where it can block."""
+        report["failures"].append(message)
+        report["passed"] = False
+        if enforced:
+            raise AttestError("description_humanized: " + message)
+        report["reason"] = message
+        return report
+
+    if len(canon) < limits["description_short_chars"]:
+        report["reason"] = (
+            f"{len(canon)} characters is under the "
+            f"{limits['description_short_chars']}-character floor: not scored, "
+            f"not rewritten, not flagged")
+        return report
+    try:
+        module, how = load_humanizer()
+    except AttestError as exc:
+        report["humanizer"] = f"unavailable: {str(exc).splitlines()[0]}"
+        if len(canon) > limits["description_chars_max"]:
+            return fail(
+                f"the description is {len(canon)} characters, over the "
+                f"{limits['description_chars_max']}-character limit, and no "
+                f"humanizer is available to cut it. Shorten it by hand and "
+                f"re-run.\n  {exc}")
+        report["reason"] = (
+            f"no humanizer available; {len(canon)} characters is under the "
+            f"{limits['description_chars_max']}-character limit, so this claim "
+            f"covers LENGTH ONLY - the description was not scored for slop")
+        return report
+    report["humanizer"] = how
+    signals = _measure(module, canon)
+    before = _slop_score(module, canon)
+    report["signals_before"] = signals
+    report["slop_score_before"] = before
+    over_length = len(canon) > limits["description_chars_max"]
+    over_slop = before is not None and before > limits["description_slop_score_max"]
+    report["flagged"] = over_length or over_slop
+    if not report["flagged"]:
+        report["slop_score_after"] = before
+        report["signals_after"] = signals
+        report["reason"] = (
+            f"{len(canon)} characters and slop_score {before} are both within "
+            f"the limits; left alone")
+        return report
+    try:
+        result = module.humanize(text, dict(context or {})) or {}
+    except Exception as exc:
+        return fail(
+            f"the description is over the limits ({len(canon)} chars, slop_score "
+            f"{before}) and the humanizer could not run: {type(exc).__name__}: "
+            f"{exc}. Cut it by hand and re-run - this is the one case where "
+            f"proceeding would attest to work that did not happen.")
+    run = result.get("run")
+    report["humanizer_run"] = dict(run) if isinstance(run, dict) else None
+    rewritten = result.get("text")
+    if not isinstance(rewritten, str) or not rewritten.strip():
+        return fail(
+            f"the humanizer returned no usable text ({type(rewritten).__name__}), "
+            f"so there is nothing to attest to.")
+    for trailer in report["preserved"]:
+        if trailer not in rewritten:
+            # report["body"] stays the INPUT: a trailer-losing rewrite must
+            # never become the text somebody posts.
+            return fail(
+                f"the rewrite dropped the attestation trailer {trailer!r}. "
+                f"ship-check reads the PR body and nothing else, so a lost "
+                f"trailer silently breaks the chain. Refusing rather than "
+                f"re-attaching it: a humanizer that drops the one block it was "
+                f"told to carry through verbatim is broken, and quietly "
+                f"repairing it hides that.")
+    rewritten, added_late = ensure_disclosure(rewritten)
+    report["disclosure_added"] = disclosure_added or added_late
+    canon_after = canonical_body(rewritten)
+    after_signals = _measure(module, canon_after)
+    after = _slop_score(module, canon_after)
+    report.update({
+        "body": rewritten,
+        "chars_after": len(canon_after),
+        "slop_score_after": after,
+        "signals_after": after_signals,
+        "humanized": True,
+        "humanizer_metrics": result.get("metrics"),
+        "reason": str(result.get("reason") or "").strip() or "rewritten by the humanizer",
+    })
+    still: list[str] = []
+    if len(canon_after) > limits["description_chars_max"]:
+        still.append(f"{len(canon_after)} characters after the rewrite, limit "
+                     f"{limits['description_chars_max']}")
+    if after is not None and after > limits["description_slop_score_max"]:
+        still.append(f"slop_score {after} after the rewrite, limit "
+                     f"{limits['description_slop_score_max']}")
+    if still:
+        return fail(
+            "; ".join(still) +
+            f". The humanizer said: {report['reason']}. Editing it by hand is "
+            f"the way past this, not moving the threshold (thresholds live in "
+            f"{thresholds_path()}).")
+    return report
+
+
+async def description_humanized(repo: str, base: str, head: str, body: str,
+                                context: Optional[dict] = None,
+                                enforce: Optional[bool] = None) -> Token:
+    """Attest that the PR description was scored, and rewritten if it needed it.
+
+    `tok.report["body"]` is the text to post - that exact text, because the
+    token binds its hash and `jj_ship` recomputes that hash from the body it is
+    about to send. Post anything else and the ship refuses.
+
+    **Run this even when the claim is not required.** While
+    `required_claims()` leaves it out, a failure is recorded in the payload
+    (`passed: false`) and in the report instead of raising, and the token is
+    issued anyway - so `attest.log.jsonl` accumulates one row per real PR
+    description carrying the body hash, the verdict and the whole signal vector.
+    That log is the only thing that can ever settle whether the scorer measures
+    slop or merely length, and `verify()` refuses a `passed: false` token the
+    moment the epoch turns the claim on, so recording one cannot let anything
+    through.
+
+    The payload also carries `degraded`, signed: True only when inference was
+    ATTEMPTED and every attempt FAILED, False when it ran or was not needed, and
+    None when `humanize()` was never called at all. A degraded run and an
+    "already clean" judgement produce identical text and mean opposite things,
+    so the flag-day decision needs that difference on the record rather than
+    guessed from the text afterwards. The rewriter's whole `run` block is kept
+    in the report, which is logged beside the payload.
+
+    Ordering, stated plainly: this runs BEFORE the body is posted, and a body
+    can be edited on github.com a minute after the PR opens. Nothing signed on
+    this machine can prevent that. What the binding buys is that the text that
+    went THROUGH the gate is pinned - `body_sha` is in the payload and in
+    `attest.log.jsonl` - so a later edit is a hash mismatch away from being
+    visible (`body_matches()`). Detection, not prevention, exactly like the
+    diff binding.
+    """
+    report = humanize_body(body, context, enforce=enforce)
+    resolved = await resolve_diff(repo, base, head)
+    report["revisions"] = {key: resolved[key] for key in
+                           ("base", "base_sha", "base_how", "head", "head_sha",
+                            "merge_base")}
+    report["body_sha"] = body_sha(report["body"])
+    run = report.get("humanizer_run") or {}
+    return _issue("description_humanized", resolved["diff_sha"],
+                  repo, base, head, None, None, 0, report,
+                  base_sha=resolved["base_sha"], merge_base=resolved["merge_base"],
+                  head_sha=resolved["head_sha"], body_sha=report["body_sha"],
+                  passed=report["passed"],
+                  degraded=run.get("degraded") if run else None)
+
+
+def body_matches(token: str, body: str) -> bool:
+    """True if `body` is the description `token` was issued over.
+
+    The after-the-fact half of the binding, for auditing a live PR: fetch the
+    body, canonicalise, compare. The trailer and line endings are excluded (see
+    `canonical_body`); every other edit shows up.
+    """
+    return decode(token).get("body_sha") == body_sha(body)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+def _cli_body(body: str) -> str:
+    """A `--body` that names an existing file is that file. A PR description is
+    long enough, and quoted enough, that passing it as an argv word is a
+    mangling waiting to happen."""
+    path = Path(body).expanduser()
+    return path.read_text() if body and path.is_file() else body
+
+
 async def run(action: str = "report", repo: str = ".", base: str = "main",
               head: str = "@", doc: str = "", quote: str = "",
-              requirements: str = "", token: str = "") -> str:
-    """action: report | diff-sha | eval-passed | design-reviewed | decode | thresholds
+              requirements: str = "", token: str = "", body: str = "",
+              context: str = "") -> str:
+    """action: report | diff-sha | eval-passed | design-reviewed |
+    humanize-report | description-humanized | check-body | decode | thresholds |
+    required-claims
 
     `requirements` is JSON: [["requirement text", "path/file.py:12"], ...].
+    `body` is the PR description, or a path to a file holding it; `context` is
+    JSON passed through to the humanizer.
     """
+    if action == "humanize-report":
+        return json.dumps(humanize_body(_cli_body(body),
+                                        json.loads(context or "{}")), indent=2)
+    if action == "description-humanized":
+        tok = await description_humanized(repo, base, head, _cli_body(body),
+                                          json.loads(context or "{}"))
+        return json.dumps({"token": str(tok), "report": tok.report}, indent=2)
+    if action == "check-body":
+        return json.dumps({"matches": body_matches(token, _cli_body(body)),
+                           "body_sha": body_sha(_cli_body(body))}, indent=2)
     if action == "thresholds":
         return json.dumps(thresholds(), indent=2)
+    if action == "required-claims":
+        return json.dumps({"now": list(required_claims()),
+                           "base": list(BASE_CLAIMS),
+                           "epoch": thresholds()["description_claim_required_since"]},
+                          indent=2)
     if action == "decode":
         return json.dumps(decode(token), indent=2)
     if action == "diff-sha":

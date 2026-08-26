@@ -9,8 +9,8 @@ Answers one question about a pull request, from its URL alone: **does its body
 carry attestations that still hold?** A matching string does not count. The
 trailer names attestation ids; each id has to resolve to a real issued claim in
 `~/.prime/agent/attest.log.jsonl`, the claims have to cover every one of
-`attest.REQUIRED_CLAIMS`, and each one has to still bind to the diff the PR
-shows right now.
+`attest.required_claims(at=<the PR's created_at>)`, and each one has to still
+bind to the diff the PR shows right now.
 
 ```python
 verdict = ship_check.verify_pr("fayhealthinc/fay-service", 7373)
@@ -27,10 +27,18 @@ result["failures"], result["notice"]
 | No `Shipped-With:` line in the body | fail |
 | The line appears only in a **comment** | fail |
 | An id with no issuance record (forged, or typed by hand) | fail |
-| Only one of the required claims | fail |
+| Only one of the claims required when the PR was OPENED | fail |
 | Attestation issued for a different head or base branch | fail |
 | Attestation bound to an older diff than the PR now shows (stale trailer) | fail |
 | Anything that cannot be established | fail, with the reason |
+
+**The required set is resolved from the PR's `created_at`, not from now.** This
+module and `jj_ship` both read it at call time, so a claim newly added to
+`attest` would otherwise fail the trailer on every PR already shipped - merged
+ones included - the moment the new code deployed. `attest.required_claims()`
+takes an epoch for that reason, and jack-michaud/nix#27 is pinned as a
+regression test: a two-claim trailer from before the epoch still verifies.
+`verdict["required"]` reports the set that was applied.
 
 **The body only, never comments.** An agent explaining the format in a review
 comment - or quoting a trailer verbatim in prose - must not thereby pass. This

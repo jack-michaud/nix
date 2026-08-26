@@ -122,9 +122,12 @@ class ShipCheckTest(unittest.TestCase):
             attest.token_id(token) for token in tokens)
 
     def write_pr(self, body, base="main", head="feature", head_sha=None,
-                 comments_body=None):
+                 comments_body=None, created_at="2026-08-25T19:16:12Z"):
         payload = {
             "body": body,
+            # jack-michaud/nix#27's real creation time by default: every fixture
+            # here is therefore a PR that predates the description-claim epoch.
+            "created_at": created_at,
             "base": {"ref": base},
             "head": {"ref": head, "sha": head_sha or self.head_sha(head)},
             "state": "open",
@@ -214,6 +217,38 @@ class ShipCheckTest(unittest.TestCase):
         verdict = ship_check.verify_pr("o/r", 1)
         self.assertFalse(verdict["ok"])
         self.assertIn("design_reviewed", verdict["reason"])
+
+    def test_a_two_claim_trailer_from_before_the_epoch_still_verifies(self):
+        """jack-michaud/nix#27, pinned. It was opened 2026-08-25T19:16:12Z with
+        a two-claim trailer and merged. Turning the description claim on must
+        not reach back and invalidate it - both this module and jj_ship read the
+        required set at call time, so without the epoch that is exactly what a
+        third claim would do to every PR already shipped."""
+        path = attest.thresholds_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(
+            {"description_claim_required_since": "2026-08-26T00:00:00Z"}))
+        tokens = self.tokens()
+        self.write_pr("Body.\n\n" + self.trailer(tokens) + "\n",
+                      created_at="2026-08-25T19:16:12Z")
+        verdict = ship_check.verify_pr("o/r", 1)
+        self.assertTrue(verdict["ok"], verdict["reason"])
+        self.assertEqual(verdict["required"],
+                         ["design_reviewed", "eval_passed"])
+
+    def test_the_same_trailer_on_a_pr_opened_after_the_epoch_fails(self):
+        """The other direction, so the pin above proves something."""
+        path = attest.thresholds_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(
+            {"description_claim_required_since": "2026-08-26T00:00:00Z"}))
+        tokens = self.tokens()
+        self.write_pr("Body.\n\n" + self.trailer(tokens) + "\n",
+                      created_at="2026-08-27T10:00:00Z")
+        verdict = ship_check.verify_pr("o/r", 1)
+        self.assertFalse(verdict["ok"])
+        self.assertIn("description_humanized", verdict["reason"])
+        self.assertIn("required when this PR was opened", verdict["reason"])
 
     def test_a_stale_trailer_fails_after_another_commit_is_pushed(self):
         tokens = self.tokens()

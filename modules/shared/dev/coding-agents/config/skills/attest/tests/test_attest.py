@@ -100,10 +100,14 @@ class AttestTestCase(unittest.TestCase):
         # and attest resolves the paths it reports.
         self.tmp = Path(self._tmp.name).resolve()
         self._saved_env = {k: os.environ.get(k) for k in
-                           ("ATTEST_HOME", "ATTEST_LINEAR_ENDPOINT", "LINEAR_API_KEY")}
+                           ("ATTEST_HOME", "ATTEST_LINEAR_ENDPOINT", "LINEAR_API_KEY",
+                            "ATTEST_HUMANIZER")}
         os.environ["ATTEST_HOME"] = str(self.tmp / "state")
         os.environ["LINEAR_API_KEY"] = "lin_api_test"
         os.environ.pop("ATTEST_LINEAR_ENDPOINT", None)
+        # Cleared, so this machine's real humanizer - present or not - cannot
+        # change what the suite measures.
+        os.environ.pop("ATTEST_HUMANIZER", None)
 
     def tearDown(self):
         for key, value in self._saved_env.items():
@@ -598,6 +602,355 @@ class BaseAnchoringTest(unittest.TestCase):
         self.assertEqual(token.report["revisions"]["base_how"], "origin/main")
         record = json.loads(attest.log_path().read_text().strip().splitlines()[-1])
         self.assertEqual(record["base_sha"], self.new_main)
+
+
+# A real humanizer module, deterministic and inference-free, written to disk and
+# loaded through ATTEST_HUMANIZER. It is built to the shared contract: keep the
+# first two paragraphs, carry every Shipped-With: trailer through byte-exact,
+# and score on length so a long text scores badly.
+STUB_HUMANIZER = r"""import re
+
+TRAILER = re.compile(r"(?m)^Shipped-With:.*$")
+
+
+def score(text):
+    return {"slop_score": min(1.0, len(text) / 8000.0),
+            "signals": {"chars": len(text)}, "too_long": len(text) > 6000}
+
+
+RUN = {"attempts": 1, "succeeded": 1, "degraded": False, "failures": [],
+       "duration_ms": 12, "attempted_at": "2026-08-26T00:00:00Z"}
+
+
+def humanize(text, context=None):
+    preserved = TRAILER.findall(text)
+    kept = [p for p in TRAILER.sub("", text).strip().split("\n\n") if p.strip()][:2]
+    out = "\n\n".join(kept + preserved)
+    return {"text": out, "changed": out != text, "reason": "kept two paragraphs",
+            "metrics": {"chars_before": len(text), "chars_after": len(out),
+                        "words_before": len(text.split()),
+                        "words_after": len(out.split()),
+                        "slop_score": score(out)["slop_score"]},
+            "preserved": preserved, "run": dict(RUN),
+            "a_key_attest_has_never_heard_of": "tolerated"}
+"""
+
+# Three humanizers that fail in the three ways a real one can.
+TRAILER_EATING_HUMANIZER = STUB_HUMANIZER.replace(
+    r'out = "\n\n".join(kept + preserved)', r'out = "\n\n".join(kept)')
+STUBBORN_HUMANIZER = STUB_HUMANIZER.replace(
+    r'out = "\n\n".join(kept + preserved)', "out = text")
+# Inference was attempted twice and failed twice: text unchanged, degraded TRUE.
+# The text is identical to an "already clean" verdict and means the opposite.
+DEGRADED_HUMANIZER = STUBBORN_HUMANIZER.replace(
+    '"attempts": 1, "succeeded": 1, "degraded": False, "failures": []',
+    '"attempts": 2, "succeeded": 0, "degraded": True, "failures": ["timeout", "timeout"]')
+BROKEN_HUMANIZER = STUB_HUMANIZER.replace(
+    "    preserved = TRAILER.findall(text)",
+    "    raise RuntimeError('no inference endpoint configured')")
+
+TRAILER_LINE = "Shipped-With: jj_ship/0.2.0 attest=1a2b3c4d5e6f,0f9e8d7c6b5a"
+
+SHORT_HUMAN_BODY = (
+    attest.DISCLOSURE_LINE + "\n\n"
+    "Bumps the pin to 1.4.2 and drops the workaround it existed for.\n\n"
+    "Ran the suite locally. Nothing else changed.\n")
+
+
+def slop(paragraphs: int) -> str:
+    """A description in the shape this check exists for: jack-michaud/nix#27 was
+    about 13000 characters of exactly this."""
+    return "\n\n".join(
+        f"### Section {n}\n\nThis section comprehensively describes the changes "
+        f"in a robust and holistic manner, ensuring that the reader is fully "
+        f"empowered to understand the seamless end-to-end implementation."
+        for n in range(paragraphs))
+
+
+# Long enough to be scored, short and plain enough to pass: the ordinary case.
+MID_HUMAN_BODY = attest.DISCLOSURE_LINE + "\n\n" + "\n\n".join(
+    f"Step {n}: read the file, changed the two lines that were wrong, and ran "
+    f"the tests. The old behaviour is kept behind the same flag as before."
+    for n in range(8))
+
+
+class DescriptionHumanizedTest(AttestTestCase):
+    """The third claim: the description a human is asked to read.
+
+    Every humanizer here is a real module on disk behind ATTEST_HUMANIZER, for
+    the same reason the Linear fetch is a real HTTP server - eval_passed()
+    counts `mock.patch(`/`MagicMock` as violations, so this suite has to pass
+    the gate it extends.
+    """
+
+    def install_humanizer(self, source: str = STUB_HUMANIZER) -> Path:
+        path = self.tmp / "humanizer_stub.py"
+        path.write_text(source)
+        os.environ["ATTEST_HUMANIZER"] = str(path)
+        return path
+
+    def test_a_short_human_description_is_never_flagged(self):
+        """The false positive that would matter most: Jack's own two-liner."""
+        self.install_humanizer()
+        report = attest.humanize_body(SHORT_HUMAN_BODY)
+        self.assertFalse(report["flagged"])
+        self.assertFalse(report["humanized"])
+        self.assertIsNone(report["slop_score_before"])  # not scored at all
+        self.assertEqual(report["body"], SHORT_HUMAN_BODY)
+        self.assertIn("floor", report["reason"])
+
+    def test_plain_prose_over_the_floor_is_scored_and_left_alone(self):
+        self.install_humanizer()
+        report = attest.humanize_body(MID_HUMAN_BODY)
+        self.assertGreater(report["chars_before"],
+                           attest.DEFAULT_THRESHOLDS["description_short_chars"])
+        self.assertIsNotNone(report["slop_score_before"])
+        self.assertFalse(report["flagged"])
+        self.assertEqual(report["body"], MID_HUMAN_BODY)
+
+    def test_the_trailer_and_the_disclosure_survive_the_rewrite(self):
+        """Losing either one is silent damage: ship-check reads the PR body and
+        nothing else, and the disclosure is policy on every public artifact."""
+        self.install_humanizer()
+        body = f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}\n\n{TRAILER_LINE}\n"
+        report = attest.humanize_body(body)
+        self.assertTrue(report["humanized"])
+        self.assertIn(TRAILER_LINE, report["body"])
+        self.assertTrue(attest.has_disclosure(report["body"]))
+        self.assertEqual(report["preserved"], [TRAILER_LINE])
+        self.assertLess(report["chars_after"], report["chars_before"])
+
+    def test_a_rewrite_that_drops_the_trailer_is_refused_not_repaired(self):
+        self.install_humanizer(TRAILER_EATING_HUMANIZER)
+        body = f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}\n\n{TRAILER_LINE}\n"
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.humanize_body(body, enforce=True)
+        self.assertIn("dropped the attestation trailer", str(ctx.exception))
+        # ...and the body handed back is the INPUT, never the damaged rewrite.
+        advisory = attest.humanize_body(body, enforce=False)
+        self.assertFalse(advisory["passed"])
+        self.assertIn(TRAILER_LINE, advisory["body"])
+
+    def test_a_missing_disclosure_is_added_rather_than_refused(self):
+        self.install_humanizer()
+        report = attest.humanize_body("Bumps the pin to 1.4.2.\n")
+        self.assertTrue(report["disclosure_added"])
+        self.assertTrue(report["body"].startswith(attest.DISCLOSURE_LINE))
+        self.assertIn("Bumps the pin to 1.4.2.", report["body"])
+
+    def test_a_rewrite_that_is_still_over_the_line_raises(self):
+        self.install_humanizer(STUBBORN_HUMANIZER)
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.humanize_body(f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}", enforce=True)
+        message = str(ctx.exception)
+        self.assertIn("characters after the rewrite", message)
+        self.assertIn("The humanizer said: kept two paragraphs", message)
+        self.assertIn("Editing it by hand", message)
+
+    def test_a_humanizer_that_cannot_run_stops_only_a_flagged_description(self):
+        """Inference down. A description that needed no rewrite never needed it."""
+        self.install_humanizer(BROKEN_HUMANIZER)
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.humanize_body(f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}", enforce=True)
+        self.assertIn("could not run", str(ctx.exception))
+        self.assertFalse(attest.humanize_body(MID_HUMAN_BODY)["flagged"])
+
+    def test_with_no_humanizer_at_all_the_claim_covers_length_only(self):
+        os.environ["ATTEST_HUMANIZER"] = str(self.tmp / "no-humanizer-here.py")
+        report = attest.humanize_body(MID_HUMAN_BODY)
+        self.assertIn("LENGTH ONLY", report["reason"])
+        self.assertTrue(report["humanizer"].startswith("unavailable"))
+        self.assertIsNone(report["slop_score_before"])
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.humanize_body(f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}", enforce=True)
+        self.assertIn("no humanizer is available", str(ctx.exception))
+
+    def test_running_the_gate_on_its_own_output_changes_nothing(self):
+        self.install_humanizer()
+        once = attest.humanize_body(
+            f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}\n\n{TRAILER_LINE}\n")
+        twice = attest.humanize_body(once["body"])
+        self.assertEqual(twice["body"], once["body"])
+        self.assertFalse(twice["humanized"])
+
+    def test_the_short_floor_and_the_limits_are_configurable(self):
+        self.install_humanizer()
+        path = attest.thresholds_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"description_short_chars": 10}))
+        report = attest.humanize_body(SHORT_HUMAN_BODY)
+        self.assertIsNotNone(report["slop_score_before"])  # now scored
+        self.assertFalse(report["flagged"])
+        self.assertEqual(report["thresholds"]["description_short_chars"], 10)
+
+    def test_the_token_binds_the_body_that_will_be_posted(self):
+        self.install_humanizer()
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.description_humanized(
+            str(repo), "main", "feature", SHORT_HUMAN_BODY))
+        payload = attest.decode(token)
+        self.assertEqual(payload["claim"], "description_humanized")
+        self.assertEqual(payload["body_sha"], attest.body_sha(SHORT_HUMAN_BODY))
+        sha = payload["diff_sha"]
+        required = ("description_humanized",)
+        attest.verify([token], sha, required=required, body=token.report["body"])
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.verify([token], sha, required=required,
+                          body=token.report["body"] + "\n\nAnd a claim nobody attested to.")
+        self.assertIn("bound to a different body", str(ctx.exception))
+        self.assertTrue(attest.body_matches(token, token.report["body"]))
+        self.assertFalse(attest.body_matches(token, "something else entirely"))
+
+    def test_the_trailer_and_crlf_do_not_change_the_body_hash(self):
+        """jj_ship appends the trailer AFTER this token exists - it names the
+        token - and GitHub hands bodies back CRLF-terminated."""
+        posted = SHORT_HUMAN_BODY + "\n" + TRAILER_LINE + "\n"
+        self.assertEqual(attest.body_sha(posted), attest.body_sha(SHORT_HUMAN_BODY))
+        self.assertEqual(attest.body_sha(SHORT_HUMAN_BODY.replace("\n", "\r\n")),
+                         attest.body_sha(SHORT_HUMAN_BODY))
+        self.assertNotEqual(attest.body_sha(posted + "one more sentence."),
+                            attest.body_sha(SHORT_HUMAN_BODY))
+
+    def test_by_default_the_claim_is_advisory_and_blocks_nothing(self):
+        """Amendment 1: until the scorer is shown to measure slop rather than
+        length, this check must not be able to refuse a ship on any machine."""
+        self.install_humanizer(STUBBORN_HUMANIZER)
+        self.assertEqual(attest.required_claims(), attest.BASE_CLAIMS)
+        self.assertNotIn(attest.DESCRIPTION_CLAIM, attest.required_claims())
+        report = attest.humanize_body(f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}")
+        self.assertFalse(report["enforced"])
+        self.assertFalse(report["passed"])
+        self.assertTrue(report["failures"])
+
+    def test_an_advisory_run_still_records_the_whole_signal_vector(self):
+        """Amendment 2: advisory must mean RECORDED. A silent check proves
+        nothing and builds no dataset."""
+        self.install_humanizer()
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.description_humanized(
+            str(repo), "main", "feature", MID_HUMAN_BODY))
+        payload = attest.decode(token)
+        self.assertEqual(payload["claim"], attest.DESCRIPTION_CLAIM)
+        self.assertTrue(payload["passed"])
+        self.assertEqual(payload["body_sha"], attest.body_sha(MID_HUMAN_BODY))
+        record = json.loads(attest.log_path().read_text().strip().splitlines()[-1])
+        self.assertEqual(record["report"]["signals_before"]["signals"]["chars"],
+                         report_chars(MID_HUMAN_BODY))
+        self.assertIsNotNone(record["report"]["slop_score_before"])
+
+    def test_an_advisory_failure_is_issued_but_cannot_satisfy_the_claim_later(self):
+        self.install_humanizer(STUBBORN_HUMANIZER)
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.description_humanized(
+            str(repo), "main", "feature", f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}"))
+        self.assertFalse(attest.decode(token)["passed"])
+        sha = attest.decode(token)["diff_sha"]
+        # Advisory: nothing is required of it, so a ship is not blocked.
+        attest.verify([token], sha, required=())
+        # After the epoch: the same token cannot stand in for the claim.
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.verify([token], sha, required=(attest.DESCRIPTION_CLAIM,),
+                          body=token.report["body"])
+        self.assertIn("did NOT pass", str(ctx.exception))
+
+
+    def test_the_rewriters_run_block_is_carried_through_and_extra_keys_are_ok(self):
+        """The humanizer contract grew a sixth key. A gate that asserts an exact
+        key set breaks on its rewriter's next release, so only named keys are
+        read."""
+        self.install_humanizer()
+        report = attest.humanize_body(
+            f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}", enforce=False)
+        self.assertTrue(report["humanized"])
+        self.assertEqual(report["humanizer_run"]["attempts"], 1)
+        self.assertFalse(report["humanizer_run"]["degraded"])
+        self.assertEqual(report["humanizer_run"]["attempted_at"],
+                         "2026-08-26T00:00:00Z")
+
+    def test_a_degraded_run_is_recorded_as_degraded_not_as_clean(self):
+        """Same text, opposite meaning: inference was attempted and every
+        attempt failed. The advisory row has to be able to tell them apart."""
+        self.install_humanizer(DEGRADED_HUMANIZER)
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.description_humanized(
+            str(repo), "main", "feature", f"{attest.DISCLOSURE_LINE}\n\n{slop(40)}"))
+        payload = attest.decode(token)
+        self.assertTrue(payload["degraded"])
+        self.assertFalse(payload["passed"])
+        record = json.loads(attest.log_path().read_text().strip().splitlines()[-1])
+        run = record["report"]["humanizer_run"]
+        self.assertEqual(run["attempts"], 2)
+        self.assertEqual(run["succeeded"], 0)
+        self.assertEqual(run["failures"], ["timeout", "timeout"])
+
+    def test_not_attempted_is_not_degradation(self):
+        """Under the floor, no humanizer, or already within the limits: the
+        rewriter was never called, so `degraded` is None rather than False."""
+        self.install_humanizer()
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        for label, body in (("short", SHORT_HUMAN_BODY), ("clean", MID_HUMAN_BODY)):
+            with self.subTest(label):
+                token = _run(attest.description_humanized(
+                    str(repo), "main", "feature", body))
+                self.assertIsNone(attest.decode(token)["degraded"])
+                self.assertIsNone(token.report["humanizer_run"])
+                self.assertTrue(attest.decode(token)["passed"])
+
+
+class RequiredClaimsEpochTest(AttestTestCase):
+    """Adding a claim to a bare tuple invalidates every trailer already
+    shipped, because jj_ship and ship_check both read the required set at call
+    time. The epoch is what stops a gate change from being retroactive."""
+
+    def turn_on(self, since: str = "2026-08-26T00:00:00Z") -> None:
+        path = attest.thresholds_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"description_claim_required_since": since}))
+
+    def test_null_means_never_required_anywhere(self):
+        self.assertIsNone(
+            attest.DEFAULT_THRESHOLDS["description_claim_required_since"])
+        self.assertEqual(attest.required_claims(), attest.BASE_CLAIMS)
+        self.assertEqual(attest.required_claims(at="2099-01-01T00:00:00Z"),
+                         attest.BASE_CLAIMS)
+
+    def test_the_epoch_splits_before_from_after(self):
+        self.turn_on()
+        self.assertEqual(attest.required_claims(at="2026-08-25T19:16:12Z"),
+                         attest.BASE_CLAIMS)
+        self.assertEqual(
+            attest.required_claims(at="2026-08-26T09:00:00Z"),
+            attest.BASE_CLAIMS + (attest.DESCRIPTION_CLAIM,))
+        self.assertEqual(attest.required_claims(at=1_798_000_000.0),
+                         attest.BASE_CLAIMS + (attest.DESCRIPTION_CLAIM,))
+
+    def test_verify_resolves_the_required_set_at_call_time(self):
+        """A default argument would freeze the answer at import; the whole
+        rollback that prompted this change was a gate that moved under a fleet
+        which had already imported it."""
+        repo = make_repo(self.tmp, CLEAN_FILES)
+        token = _run(attest.eval_passed(str(repo), "main", "feature"))
+        sha = attest.decode(token)["diff_sha"]
+        design = str(attest._issue("design_reviewed", sha, str(repo), "main",
+                                   "feature", "ENG-1", "q" * 64, 1, {}))
+        attest.verify([token, design], sha)          # two claims: enough today
+        self.turn_on()
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.verify([token, design], sha)
+        self.assertIn("description_humanized", str(ctx.exception))
+
+    def test_an_unreadable_epoch_says_so_instead_of_guessing(self):
+        path = attest.thresholds_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"description_claim_required_since": "soon"}))
+        with self.assertRaises(attest.AttestError) as ctx:
+            attest.required_claims()
+        self.assertIn("cannot read 'soon' as a time", str(ctx.exception))
+
+
+def report_chars(text: str) -> int:
+    """What the stub humanizer's `chars` signal should say for `text`."""
+    return len(attest.canonical_body(text))
 
 
 def hashlib_sha256(text: str) -> str:

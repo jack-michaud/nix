@@ -92,8 +92,11 @@ jj_ship --action watch --repo /path/to/repo --pr 42 --interval 20
 ## Attestations
 
 Creating a **non-draft** PR, or `mark_ready()`-ing a draft, requires one signed
-token per claim in `attest.REQUIRED_CLAIMS` - `design_reviewed` **and**
-`eval_passed` - produced by the `attest` skill. Drafting requires none, on
+token per claim in `attest.required_claims()`, resolved at call time - today
+`design_reviewed` and `eval_passed`, produced by the `attest` skill.
+`description_humanized` is computed and logged on every ship but is NOT required
+until an epoch is set in the thresholds file; see attest's SKILL.md for why it
+ships advisory and what has to be true before it can be turned on. Drafting requires none, on
 purpose: a draft is where work-in-progress belongs, and friction there only
 teaches agents to skip drafts.
 
@@ -106,6 +109,15 @@ the hash inside each token. So:
   hashes;
 - a missing claim is refused by name, telling you which `attest.<claim>(...)` to
   run.
+
+The **body** about to be posted is handed to `attest.verify(..., body=...)` at
+the same moment, because this is the only place it can be seen: the
+`description_humanized` claim is bound to the description's hash, so posting
+anything other than `tok.report["body"]` is refused with `the description
+attestation is bound to a different body`. The `Shipped-With:` trailer and line
+endings are excluded from that hash - jj_ship appends the trailer *after* the
+token exists, and GitHub hands bodies back CRLF-terminated - so the trailer this
+path stamps never invalidates the claim it stamps.
 
 On success the body gains a trailer:
 
