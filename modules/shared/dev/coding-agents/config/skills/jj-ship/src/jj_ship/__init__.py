@@ -580,9 +580,11 @@ def _pr_arg(pr: Optional[Any]) -> list[str]:
 
 
 async def checks(pr: Optional[Any] = None, repo: str = ".") -> dict:
-    """CI check runs for a PR: {state, checks:[{name,state,link}], raw}.
+    """CI check runs for a PR: {state, checks:[{name,state,link}], skipped, raw}.
 
-    `state` is one of pending | passing | failing | none.
+    `state` is one of pending | passing | failing | none. "none" covers both no
+    checks at all and every check SKIPPED, because a run in which nothing executed
+    proves nothing; `skipped` names them so a caller can tell the two apart.
     """
     r = await _gh(["pr", "checks", *_pr_arg(pr), "--json",
                    "name,state,bucket,link,description"], repo=repo, check=False)
@@ -593,15 +595,22 @@ async def checks(pr: Optional[Any] = None, repo: str = ".") -> dict:
         raise JjShipError(f"gh pr checks failed: {text.strip()}")
     rows = json.loads(r["out"] or "[]")
     buckets = {row.get("bucket") for row in rows}
+    skipped = [row.get("name") for row in rows if row.get("bucket") == "skipping"]
     if not rows:
         state = "none"
     elif "fail" in buckets or "cancel" in buckets:
         state = "failing"
     elif "pending" in buckets:
         state = "pending"
+    elif buckets <= {"skipping"}:
+        # Every job skipped. gh buckets `skipping` alongside `pass`, so folding it
+        # into "passing" reports green for a run that proved nothing - a conditional
+        # job that never fired looks identical to one that ran and succeeded. Callers
+        # gate on `state`, so this has to be a non-passing state rather than a note.
+        state = "none"
     else:
         state = "passing"
-    return {"state": state, "checks": rows, "raw": text.strip()}
+    return {"state": state, "checks": rows, "skipped": skipped, "raw": text.strip()}
 
 
 _THREAD_QUERY = """
