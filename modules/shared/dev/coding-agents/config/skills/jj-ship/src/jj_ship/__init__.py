@@ -671,6 +671,32 @@ def _assert_tokens_match_pr_head(attestations: Optional[list[str]], info: dict) 
                 f"Re-attest against {pr_head[:12]} and try again.")
 
 
+
+def _assert_tokens_match_pr_head(attestations: Optional[list[str]], info: dict) -> None:
+    """Every token must be bound to the commit GitHub currently shows as the head.
+
+    Verification already checks the token against the diff, but it computes that
+    diff from a revision the CALLER supplied. If the caller names a ref that has
+    moved, both sides can agree with each other and disagree with the PR. On
+    jack-michaud/nix#27 that produced a trailer asserting a review of round 2
+    while the tokens were bound to round 1. This asks GitHub instead, which is
+    the only party with no stake in the answer.
+    """
+    pr_head = (info or {}).get("headRefOid")
+    if not pr_head or not attestations:
+        return
+    attest = _attest()
+    for token in attestations:
+        bound = (attest.decode(token) or {}).get("head_sha")
+        if bound and bound != pr_head:
+            raise JjShipError(
+                f"refusing to mark PR #{info.get('number')} ready: a "
+                f"{attest.decode(token).get('claim')} attestation is bound to "
+                f"{bound[:12]}, but the PR head is {pr_head[:12]}. The PR moved "
+                f"after the claim was made, so the claim is about different code. "
+                f"Re-attest against {pr_head[:12]} and try again.")
+
+
 async def mark_ready(pr: Optional[Any] = None, repo: str = ".",
                      head: Optional[str] = None, base: Optional[str] = None,
                      attestations: Optional[list[str]] = None,
@@ -709,9 +735,11 @@ def _pr_arg(pr: Optional[Any]) -> list[str]:
 
 
 async def checks(pr: Optional[Any] = None, repo: str = ".") -> dict:
-    """CI check runs for a PR: {state, checks:[{name,state,link}], raw}.
+    """CI check runs for a PR: {state, checks:[{name,state,link}], skipped, raw}.
 
-    `state` is one of pending | passing | failing | none.
+    `state` is one of pending | passing | failing | none. "none" covers both no
+    checks at all and every check SKIPPED, because a run in which nothing executed
+    proves nothing; `skipped` names them so a caller can tell the two apart.
     """
     r = await _gh(["pr", "checks", *_pr_arg(pr), "--json",
                    "name,state,bucket,link,description"], repo=repo, check=False)
@@ -722,15 +750,22 @@ async def checks(pr: Optional[Any] = None, repo: str = ".") -> dict:
         raise JjShipError(f"gh pr checks failed: {text.strip()}")
     rows = json.loads(r["out"] or "[]")
     buckets = {row.get("bucket") for row in rows}
+    skipped = [row.get("name") for row in rows if row.get("bucket") == "skipping"]
     if not rows:
         state = "none"
     elif "fail" in buckets or "cancel" in buckets:
         state = "failing"
     elif "pending" in buckets:
         state = "pending"
+    elif buckets <= {"skipping"}:
+        # Every job skipped. gh buckets `skipping` alongside `pass`, so folding it
+        # into "passing" reports green for a run that proved nothing - a conditional
+        # job that never fired looks identical to one that ran and succeeded. Callers
+        # gate on `state`, so this has to be a non-passing state rather than a note.
+        state = "none"
     else:
         state = "passing"
-    return {"state": state, "checks": rows, "raw": text.strip()}
+    return {"state": state, "checks": rows, "skipped": skipped, "raw": text.strip()}
 
 
 _THREAD_QUERY = """
