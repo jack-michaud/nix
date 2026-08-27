@@ -6,10 +6,16 @@ let cfg = config.modules.editors.nvim;
 in {
   options.modules.editors.nvim = {
     enable = mkBoolOpt false;
+    gitProtocol = mkOption {
+      type = types.enum [ "ssh" "http" "https" ];
+      default = "ssh";
+      description = "Git protocol for lazy.nvim plugin clones. Default is ssh.";
+    };
   };
 
   config = mkIf cfg.enable {
     env.EDITOR = "nvim";
+    env.NVIM_LAZY_GIT_PROTOCOL = cfg.gitProtocol;
 
     # Equivalent of home-manager's mkOutOfStoreSymlink (which isn't reachable
     # through the darwin-level `home.file` alias): links to the live checkout
