@@ -2,23 +2,31 @@
 
 > Base: `deepagents_code/hooks/server_middleware.py::ServerHooksMiddleware` — dcode's hook engine is an `AgentMiddleware` subclass overriding `before_model` / `after_model` / `wrap_tool_call`. Declarative `hooks.json` is a JSON-codec transport on top of those same decision points. Re-verify signaturesin `langchain/agents/middleware/types.py` if the package version changed.
 
-## Portability rule
+## Default: compiled middleware
+
+**Implement hook behavior as `AgentMiddleware`, not `hooks.json`, by default.** The dcode extension envelope can register that middleware; a packaged app passes it directly to `create_deep_agent`. Only reach for the declarative `hooks.json` transport when you specifically need:
+
+1. **Runtime-loadable hooks config** — hooks edited/reloaded without redeploying code (project `.deepagents/hooks.json`, user `~/.deepagents/hooks.json`, plugin hooks; re-read on `/reload`, session start,, or cwd switch();
+2. **Non-Python hook handlers** — external commands or HTTP endpoints receiving a Claude-compatible envelope (`hooks/models/wire.py`), with decision protocol per event (allow / deny / stop processing);
+3. **Claude-code-hook-ecosystem compat** — the same `hooks.json` shape works in Claude Code (`.claude/settings.json`-style hooks(.
+
+Otherwise compiled middleware wins: type-safe, in-process, teardown-aware,, debug-able tooling.
+
+
 
 | Layer | Where it works |
 |---|---|
-| `hooks.json` + subprocess/HTTP handlers | dcode harness only (dynamic, declarative,, loadable via `/reload`) |
-| Compiled `AgentMiddleware` + `BaseTool`s | portable: dcode extensions,, plain `create_deep_agent` apps,, this sandbox's AgentCore app |
-
-For behavior that must survive a packaged app: implement hook decisions as `AgentMiddleware`, not as JSON hooks. The dcode extension envelope can register that middleware; a packaged app passes it directly to `create_deep_agent`.
+| `hooks.json` + subprocess/HTTP handlers | dcode harness (Claude Code compat( — dynamic,, declarative,, loadable via `/reload` |
+| Compiled `AgentMiddleware` + `BaseTool`s | portable: dcode extensions,, plain `create_deep_agent` apps,, packaged AgentCore app |
 
 ## Events → middleware methods
 
 | Hook event (`hooks/models/domain.py`) | `AgentMiddleware` boundary | Notes |
 |---|---|---|
-| `SessionStart` | process/app lifecycle — client fires it; the agent graph has no such boundary | In a packaged app, do it at server/request startup |
+| `SessionStart` | process/app lifecycle — client fires it;the agent graph has no such boundary | In a packaged app, do it at server/request startup |
 | `SessionEnd` | process/app lifecycle — client fires it | Do it at teardown in your app |
 | `UserPromptSubmit` | process/app lifecycle — client fires it before the turn | Do it at request ingress in your app |
-| `PreToolUse` | `wrap_tool_call` / `awrap_tool_call` — inspect `ToolCallRequest` before calling `handler`; return `ToolMessage(...)` (or `Command`) to block | Deny by returning a `ToolMessage` with the same `tool_call_id`. (`server_middleware.py` mirrors this.) |
+| `PreToolUse` | `wrap_tool_call` / `awrap_tool_call` — inspect `ToolCallRequest` before calling `handler`; return `ToolMessage(...)` (or `Command`)to block | Deny by returning a `ToolMessage` with the same `tool_call_id`. (`server_middleware.py` mirrors this.) |
 | `PostToolUse` | `wrap_tool_call` — call `handler(request)`, then observe the returned `ToolMessage` / `Command` | Post hooks run in the same wrapper: after `handler`, before return |
 | `PostToolUseFailure` | same `wrap_tool_call` post section,, guarded on exception/error result | Non-`ToolMessage` exceptional returns bowled there |
 | `PermissionRequest` | `langchain.agents.middleware.HumanInTheLoopMiddleware`, or your own interrupt inside `wrap_tool_call` | `approval_mode` gates this in dcode; middleware lets you inject your own approval transport |
@@ -39,7 +47,7 @@ For behavior that must survive a packaged app: implement hook decisions as `Agen
 | `wrap_tool_call` / `awrap_tool_call` | wraps each tool call | pre-tool guards,, denial,, audit,, timing,, post-tool observation |
 | `after_agent` / `aafter_agent` | agent finished (`Command`/stop returned) | completion hooks,, notifications,, telemetry |
 
-Both sync and async forms exist;implementations must define either form, not both mismatched. Middleware compose in declaration order (first defined = outermost)。
+Both syncand async forms exist;implementations must define either form, not both mismatched. Middleware compose in declaration order (first defined = outermost)。
 
 ## Minimal guard-hook middleware (portable)
 
