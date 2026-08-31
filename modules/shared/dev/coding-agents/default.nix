@@ -73,6 +73,7 @@ let
     "agentsmd-rules.md" = { substitute = true; };
     # Substituted so the body names the real checkout path.
     "editing-agent-rules.md" = { substitute = true; };
+    "python-rules.md" = { };
   };
 
   # Claude Code loads no-`paths` rules from ~/.claude/rules natively but never
