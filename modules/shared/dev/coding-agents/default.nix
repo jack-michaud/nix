@@ -6,6 +6,7 @@ let
   cfg = config.modules.dev.coding-agents;
   configDir = "${config.dotfiles.modulesDir}/shared/dev/coding-agents/config";
   rulesDir = "${configDir}/rules";
+  dcodeExtensionsDir = "${configDir}/dcode-extensions";
 
   substVars = ''
     --subst-var-by host ${escapeShellArg config.environment.variables.NIX_FLAKE_HOST} \
@@ -66,6 +67,8 @@ let
   };
   extensionNames = attrNames
     (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/extensions));
+  dcodeExtensionNames = attrNames
+    (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/dcode-extensions));
 
   rules = {
     # Substituted so the `paths` trigger globs carry the real vault path.
@@ -157,9 +160,16 @@ in {
         ln -s ${escapeShellArg "${configDir}/pi-extensions/agent-rules.ts"} $out
       '';
     } (mapAttrsToList mkAgentRule rules ++ map mkAgentSkill skillNames
-      ++ map mkAgentExtension extensionNames);
+      ++ map mkAgentExtension extensionNames)
+        // listToAttrs (map (name: {
+          name = ".deepagents/extensions/${name}";
+          value.source = pkgs.runCommandLocal name { } ''
+            ln -s ${escapeShellArg "${dcodeExtensionsDir}/${name}"} $out
+          '';
+        }) dcodeExtensionNames);
 
     home-manager.users.${config.user.name} = { lib, ... }: {
+      home.sessionVariables.DEEPAGENTS_CODE_EXPERIMENTAL = "1";
       home.activation = {
         claudeGlobalRuleFilesHook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
           run ${mergeGlobalRuleFilesHook}

@@ -10,7 +10,7 @@ compatibility: Requires the dcode CLI (deepagents-code package installed via uv 
 
 ## Overview
 
-Extending the Deep Agents harness means writing the same framework primitives a packaged app uses — `BaseTool`, `AgentMiddleware`, `BackendProtocol` — wrapped in a thin per-harness envelope. Implement hook behavior by default as compiled `AgentMiddleware`; dcode's `hooks.json` transport merely serializes those same decision points, so porting is re-implementing JSON hooks in middleware. The SDK moves fast: never write extension or hook code from memory — verify against the installed source first.
+Extending the Deep Agents harness means writing the same framework primitives a packaged app uses — `BaseTool`, `AgentMiddleware`, `BackendProtocol` — wrapped in a thin per-harness envelope. The repo's `config/dcode-extensions/agent-rules/` is the reference for portable, path-triggered rule injection over `~/.agents/rules/`. Implement hook behavior by default as compiled `AgentMiddleware`; dcode's `hooks.json` transport merely serializes those same decision points, so porting is re-implementing JSON hooks in middleware. The SDK moves fast: never write extension or hook code from memory — verify against the installed source first.
 
 ## Workflow
 
