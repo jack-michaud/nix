@@ -61,6 +61,37 @@ class PiPackagesTest(unittest.TestCase):
                 self.assertEqual(len(result["packages"]), len(PINS))
                 self.assertIn({"source": PINS[2], "extensions": []}, result["packages"])
 
+    def test_slashed_git_refs_are_repinned(self):
+        for index in [0, 2, 3]:
+            pin = PINS[index]
+            repository = pin.rsplit("@", 1)[0]
+            for ref in ["feature/review", "refs/tags/v1.0", "team/feature/review"]:
+                for filtered in [False, True]:
+                    with self.subTest(pin=pin, ref=ref, filtered=filtered):
+                        source = repository + "@" + ref
+                        entry = {"source": source, "extensions": []} if filtered else source
+                        result = merge({"packages": [entry, pin]})
+                        expected = {"source": pin, "extensions": []} if filtered else pin
+                        self.assertEqual(len(result["packages"]), len(PINS))
+                        self.assertIn(expected, result["packages"])
+                        self.assertEqual(merge(result), result)
+
+    def test_slashed_refs_in_all_verified_github_forms(self):
+        for source in ["git:github.com/jack-michaud/pi-nvim@feature/review",
+                       "git:git@github.com:jack-michaud/pi-nvim.git@feature/review",
+                       "git:ssh://git@github.com/jack-michaud/pi-nvim.git@refs/tags/v1",
+                       "https://github.com/jack-michaud/pi-nvim.git@feature/review"]:
+            with self.subTest(source=source):
+                result = merge({"packages": [{"source": source, "extensions": []}]})
+                self.assertEqual(len(result["packages"]), len(PINS))
+                self.assertIn({"source": PINS[2], "extensions": []}, result["packages"])
+
+    def test_unrelated_ssh_sources_keep_their_identity(self):
+        others = ["git:git@gitlab.com:algal/pi-openai-server-compaction@feature/review",
+                  "git:git@github.com:algal/pi-openai-server-compaction-extra@feature/review"]
+        result = merge({"packages": others})
+        self.assertEqual(result["packages"], others + PINS)
+
     def test_unversioned_npm_and_missing_packages(self):
         self.assertEqual(merge({"packages": ["npm:@langchain/langsmith-pi-extension"]}),
                          {"packages": PINS})

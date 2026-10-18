@@ -41,8 +41,11 @@ let
     doCheck = false;
   };
   projectsPluginDir = pkgs.runCommandLocal "herdr-projects-plugin-dir" { } ''
-    mkdir -p $out/bin
+    mkdir -p $out/bin $out/target/release
     cp ${projectsSrc}/herdr-plugin.toml $out/herdr-plugin.toml
+    # Doctor checks this source-build layout against the generated launcher's
+    # canonical binary path. Keep the same store binary reachable from here.
+    ln -s ${projects}/bin/herdr-projects $out/target/release/herdr-projects
     # Preserve the manifest's command interface, but never download a moving
     # release or write binaries into the immutable plugin directory at runtime.
     cat > $out/bin/run.sh <<'EOF'

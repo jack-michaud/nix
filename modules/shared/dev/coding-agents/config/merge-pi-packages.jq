@@ -8,7 +8,9 @@ def identity:
     elif test("^(git:|https://github.com/)") then
       sub("^git:"; "")
       | sub("^(https://|ssh://git@|git@)github.com[:/]"; "github.com/")
-      | sub("@[^/]+$"; "")
+      # Git refs may contain slashes. Only consume @ after owner/repository,
+      # so an SSH user or an unrelated host is never mistaken for a ref.
+      | sub("^(?<repo>github\\.com/[^/@]+/[^/@]+)@.+$"; "\(.repo)")
       | sub("\\.git$"; "")
     else . end;
 def source: if type == "string" then . else .source end;
