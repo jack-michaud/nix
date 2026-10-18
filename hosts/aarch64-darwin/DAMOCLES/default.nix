@@ -72,14 +72,13 @@
     # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
     # overrides the role to "work" in flake.nix.
     dev.coding-agents.enable = true;
-    # Base personal plugins on Damocles only. Leave versions to Pi so
-    # `pi update --extensions` can roll forward without a Nix edit; KRONOS
-    # must not acquire private plugins or opt into tracing/editor changes.
+    # Verified personal plugins on Damocles only; KRONOS shares this module
+    # but must not acquire private plugins or opt into tracing/editor changes.
     dev.coding-agents.piPackages = lib.optionals
       (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") [
-        "git:github.com/kylesnowschwartz/pi-bionic-reading"
-        "npm:@langchain/langsmith-pi-extension"
-        "git:git@github.com:jack-michaud/pi-nvim.git"
+        "git:github.com/kylesnowschwartz/pi-bionic-reading@88e912e677321de293543af4d5a77e2325eaa24e"
+        "npm:@langchain/langsmith-pi-extension@0.2.1"
+        "git:git@github.com:jack-michaud/pi-nvim.git@2723c28f0fb1b7bc165aa01a0f7fc55f333b312c"
       ];
     dev.coding-agents.piPackageAliases = lib.optionalAttrs
       (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") {
@@ -114,8 +113,10 @@
       # `herdr plugin install --yes`. Herdr owns versions and later updates.
       herdr.plugins = [
         "NathanFlurry/herdr-plugin-jj-workspace"
-      ] ++ lib.optional (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES")
-        "eliasstravik/herdr-projects";
+      ] ++ lib.optionals (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") [
+        # Add personal plugins to this list (not shared with KRONOS).
+        "eliasstravik/herdr-projects"
+      ];
     };
     desktop = {
       terminals.alacritty.enable = true;

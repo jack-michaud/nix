@@ -17,14 +17,12 @@ def source: if type == "string" then . else .source end;
 
 # Keep filters, including [] (disabled resources), and all other user fields.
 # Prefer an object over a duplicate string when adopting an existing package.
-# Unversioned declarations remove old pins so Pi can manage future updates;
-# this only merges settings, never changes an already-installed checkout.
-reduce $packages[0][] as $declared (.;
-  ($declared | identity) as $id
+reduce $packages[0][] as $pin (.;
+  ($pin | identity) as $id
   | [(.packages // [])[] | select((source | identity) == $id)] as $old
-  | (($old | map(select(type == "object")) | first) // $declared) as $entry
+  | (($old | map(select(type == "object")) | first) // $pin) as $entry
   | .packages = (
       [(.packages // [])[] | select((source | identity) != $id)]
-      + [if ($entry | type) == "object" then $entry + {source: $declared} else $declared end]
+      + [if ($entry | type) == "object" then $entry + {source: $pin} else $pin end]
     )
 )

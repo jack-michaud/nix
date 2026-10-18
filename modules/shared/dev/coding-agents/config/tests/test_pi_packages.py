@@ -11,13 +11,12 @@ PINS = [
     "git:git@github.com:jack-michaud/pi-nvim.git@reviewed",
     "git:github.com/kylesnowschwartz/pi-bionic-reading@reviewed",
 ]
-BASE_PACKAGES = [pin.rsplit("@", 1)[0] for pin in PINS]
 LOCAL = "../../Code/github.com/kylesnowschwartz/pi-bionic-reading"
 
 
-def merge(settings, packages=PINS):
+def merge(settings):
     result = subprocess.run(
-        ["jq", "--argjson", "packages", json.dumps([packages]),
+        ["jq", "--argjson", "packages", json.dumps([PINS]),
          "--argjson", "aliases", json.dumps({LOCAL: PINS[3]}), "-f", str(FILTER)],
         input=json.dumps(settings), text=True, capture_output=True, check=True,
     )
@@ -92,32 +91,6 @@ class PiPackagesTest(unittest.TestCase):
                   "git:git@github.com:algal/pi-openai-server-compaction-extra@feature/review"]
         result = merge({"packages": others})
         self.assertEqual(result["packages"], others + PINS)
-
-    def test_unpinned_base_set_migrates_old_pins_and_local_sources(self):
-        filtered = {"source": PINS[1], "extensions": [], "autoload": False}
-        settings = {"theme": "dark", "skills": ["-../example"], "packages": [
-            PINS[0], filtered, PINS[2].rsplit("@", 1)[0] + "@feature/review",
-            LOCAL, "./unmanaged", *PINS,
-        ]}
-        result = merge(settings, BASE_PACKAGES)
-        expected = ["./unmanaged", BASE_PACKAGES[0],
-                    filtered | {"source": BASE_PACKAGES[1]}, *BASE_PACKAGES[2:]]
-        self.assertEqual(result, settings | {"packages": expected})
-        self.assertEqual(merge(result, BASE_PACKAGES), result)
-
-    def test_unpinned_base_set_is_added_to_empty_settings(self):
-        result = merge({}, BASE_PACKAGES)
-        self.assertEqual(result, {"packages": BASE_PACKAGES})
-        self.assertEqual(merge(result, BASE_PACKAGES), result)
-
-    def test_unpinned_base_set_preserves_all_disabled_resources(self):
-        for pin, source in zip(PINS, BASE_PACKAGES):
-            with self.subTest(source=source):
-                entry = {"source": pin, "extensions": [], "skills": [],
-                         "prompts": [], "themes": [], "autoload": False}
-                result = merge({"packages": [entry]}, BASE_PACKAGES)
-                self.assertEqual(len(result["packages"]), len(BASE_PACKAGES))
-                self.assertIn(entry | {"source": source}, result["packages"])
 
     def test_unversioned_npm_and_missing_packages(self):
         self.assertEqual(merge({"packages": ["npm:@langchain/langsmith-pi-extension"]}),
