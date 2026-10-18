@@ -94,10 +94,10 @@ let
   globalRuleFilesHookJson = pkgs.writeText "global-rule-files-hook.json"
     (builtins.toJSON globalRuleFilesHook);
 
-  # Pi installs packages declared in settings on its next startup. Pin the git
-  # ref so rebuilding this config always selects the reviewed revision.
+  # Nix declares the base package set; Pi installs missing packages at startup
+  # and owns their versions. `pi update --extensions` rolls them forward.
   piPackages = [
-    "git:github.com/algal/pi-openai-server-compaction@8a3de2f3b0c178fdd6f73f2f94172dfc3943e466"
+    "git:github.com/algal/pi-openai-server-compaction"
   ] ++ cfg.piPackages;
   piPackagesJson = pkgs.writeText "pi-packages.json" (builtins.toJSON piPackages);
 
@@ -139,8 +139,8 @@ in {
     role = mkOpt types.str "personal";
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
-    # Pi reconciles these sources on startup, just like the existing compaction
-    # package. Keep machine-specific/private packages opt-in at the host level.
+    # Additional base packages, normally unversioned so Pi manages updates.
+    # Keep machine-specific/private packages opt-in at the host level.
     piPackages = mkOpt (types.listOf types.str) [ ];
     # Explicitly adopted local package paths -> repository sources. Never infer
     # an identity from a directory's basename (it may be a development fork).
