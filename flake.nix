@@ -35,20 +35,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
-    # Built in nix (see modules/shared/shells/herdr) rather than via
-    # `herdr plugin install`, which shells out to the system cargo.
-    herdr-plugin-jj-workspace = {
-      url = "github:NathanFlurry/herdr-plugin-jj-workspace";
-      flake = false;
-    };
-
-    # Match the verified Damocles installation, not the moving release launcher.
-    herdr-projects = {
-      url = "github:eliasstravik/herdr-projects/c88ae8ad64378dfffb9360145e1e72f32b7d47d6";
-      flake = false;
-    };
-
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
@@ -97,7 +83,7 @@
       in {
         "jack@DARKFOREST" = home-manager.lib.homeManagerConfiguration {
           pkgs = hmPkgs;
-          # Shared dev modules (agent-harness, comment-trainer, herdr plugin)
+          # Shared dev modules (agent-harness, comment-trainer)
           # read flake inputs directly, so forward them into the HM eval.
           extraSpecialArgs = { inherit inputs; };
           modules = [ ./hosts/x86_64-linux/DARKFOREST/home.nix ];

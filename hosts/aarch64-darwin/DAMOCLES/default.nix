@@ -110,7 +110,12 @@
       tmux.enable = true;
       zsh.enable = true;
       herdr.enable = true;
-      herdr.projects.enable = config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES";
+      # Add trusted GitHub plugins here; activation runs missing entries via
+      # `herdr plugin install --yes`. Herdr owns versions and later updates.
+      herdr.plugins = [
+        "NathanFlurry/herdr-plugin-jj-workspace"
+      ] ++ lib.optional (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES")
+        "eliasstravik/herdr-projects";
     };
     desktop = {
       terminals.alacritty.enable = true;
