@@ -98,7 +98,7 @@ let
   # ref so rebuilding this config always selects the reviewed revision.
   piPackages = [
     "git:github.com/algal/pi-openai-server-compaction@8a3de2f3b0c178fdd6f73f2f94172dfc3943e466"
-  ];
+  ] ++ cfg.piPackages;
   piPackagesJson = pkgs.writeText "pi-packages.json" (builtins.toJSON piPackages);
 
   # Merged (not symlinked) into ~/.claude/settings.json: the file is mutable —
@@ -127,15 +127,9 @@ let
     settings="$HOME/.pi/agent/settings.json"
     mkdir -p "$HOME/.pi/agent"
     [ -s "$settings" ] || echo '{}' > "$settings"
-    ${pkgs.jq}/bin/jq --slurpfile packages ${piPackagesJson} '
-      .packages = (
-        [(.packages // [])[] | select(
-          ((if type == "string" then . else (.source // "") end)
-           | startswith("git:github.com/algal/pi-openai-server-compaction"))
-          | not
-        )] + $packages[0]
-      )
-    ' "$settings" > "$settings.hm-tmp"
+    ${pkgs.jq}/bin/jq --slurpfile packages ${piPackagesJson} \
+      --argjson aliases ${escapeShellArg (builtins.toJSON cfg.piPackageAliases)} \
+      -f ${./config/merge-pi-packages.jq} "$settings" > "$settings.hm-tmp"
     mv "$settings.hm-tmp" "$settings"
   '';
 in {
@@ -145,6 +139,12 @@ in {
     role = mkOpt types.str "personal";
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
+    # Pi reconciles these sources on startup, just like the existing compaction
+    # package. Keep machine-specific/private packages opt-in at the host level.
+    piPackages = mkOpt (types.listOf types.str) [ ];
+    # Explicitly adopted local package paths -> repository sources. Never infer
+    # an identity from a directory's basename (it may be a development fork).
+    piPackageAliases = mkOpt (types.attrsOf types.str) { };
   };
 
   config = mkIf cfg.enable {

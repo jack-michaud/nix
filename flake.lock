@@ -53,22 +53,6 @@
         "url": "ssh://git@github.com/jack-michaud/comment-trainer"
       }
     },
-    "herdr-plugin-jj-workspace": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783487155,
-        "narHash": "sha256-xspdQfcwTEdUwZ0nWAfrdvz5IBVNVyMkmpmpzkUl0LE=",
-        "owner": "NathanFlurry",
-        "repo": "herdr-plugin-jj-workspace",
-        "rev": "a9f1d3bcdaa2354e336a5173da85cbe4970c0f2e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NathanFlurry",
-        "repo": "herdr-plugin-jj-workspace",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -164,7 +148,6 @@
       "inputs": {
         "agent-harness": "agent-harness",
         "comment-trainer": "comment-trainer",
-        "herdr-plugin-jj-workspace": "herdr-plugin-jj-workspace",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",

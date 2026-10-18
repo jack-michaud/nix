@@ -35,14 +35,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Herdr plugin: create/remove jj workspaces as Herdr workspaces.
-    # Built in nix (see modules/shared/shells/herdr) rather than via
-    # `herdr plugin install`, which shells out to the system cargo.
-    herdr-plugin-jj-workspace = {
-      url = "github:NathanFlurry/herdr-plugin-jj-workspace";
-      flake = false;
-    };
-
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let
@@ -91,7 +83,7 @@
       in {
         "jack@DARKFOREST" = home-manager.lib.homeManagerConfiguration {
           pkgs = hmPkgs;
-          # Shared dev modules (agent-harness, comment-trainer, herdr plugin)
+          # Shared dev modules (agent-harness, comment-trainer)
           # read flake inputs directly, so forward them into the HM eval.
           extraSpecialArgs = { inherit inputs; };
           modules = [ ./hosts/x86_64-linux/DARKFOREST/home.nix ];

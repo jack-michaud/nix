@@ -1,44 +1,34 @@
-{ config, options, lib, pkgs, inputs, ... }:
+{ config, options, lib, pkgs, ... }:
 
 with lib;
 with lib.my;
 
 let
   cfg = config.modules.shells.herdr;
-
-  jjWorkspaceSrc = inputs.herdr-plugin-jj-workspace;
-
-  # Build the plugin in nix instead of `herdr plugin install`, which shells
-  # out to the system cargo at install time — the rustup toolchain can be
-  # older than the plugin's deps require (rustc 1.87 vs ratatui's 1.88).
-  jjWorkspace = pkgs.rustPlatform.buildRustPackage {
-    pname = "herdr-plugin-jj-workspace";
-    version = jjWorkspaceSrc.shortRev or "unstable";
-    src = jjWorkspaceSrc;
-    cargoLock.lockFile = jjWorkspaceSrc + "/Cargo.lock";
+  installPlugins = pkgs.writeShellApplication {
+    name = "install-herdr-plugins";
+    # Native installs may build Rust plugins. Do not pick up an older rustup
+    # toolchain from the user's shell (jj-workspace requires a recent rustc).
+    runtimeInputs = [ pkgs.jq pkgs.git pkgs.curl pkgs.cargo pkgs.rustc ]
+      ++ optionals (!pkgs.stdenv.isDarwin) [ pkgs.stdenv.cc ];
+    # Outside a Nix build, Darwin's system compiler supplies the selected Xcode
+    # SDK (including libiconv); a bare Nix cc lacks stdenv's linker setup.
+    text = optionalString pkgs.stdenv.isDarwin ''
+      export PATH="$PATH:/usr/bin:/bin"
+    '' + builtins.readFile ./config/install-plugins.sh;
   };
-
-  # The manifest's action commands are relative (`./target/release/...`) and
-  # herdr resolves them against the plugin root, so mirror the layout a
-  # `cargo build --release` would have produced. The manifest must be a real
-  # file, not a symlink: herdr canonicalizes the manifest path when deriving
-  # the plugin root, and a symlink would resolve it back to the bare source
-  # tree (which has no target/release binary).
-  jjWorkspacePluginDir = pkgs.runCommandLocal "herdr-plugin-jj-workspace-dir" { } ''
-    mkdir -p $out/target/release
-    cp ${jjWorkspaceSrc}/herdr-plugin.toml $out/herdr-plugin.toml
-    ln -s ${jjWorkspace}/bin/jj-workspace $out/target/release/jj-workspace
-  '';
 in {
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
 
-    # The herdr binary itself isn't installed by this module — on darwin it
-    # comes from Homebrew, so activation looks it up at runtime. Hosts that
-    # get herdr from nixpkgs set this instead: home-manager's activation
-    # script overwrites PATH with a fixed set of store paths (the user profile
-    # is never on it), so a PATH lookup can't find a nix-installed herdr.
+    # Darwin normally uses a user/Homebrew-managed Herdr. On Linux, set this
+    # so activation can find the binary outside the user profile's PATH.
     package = mkOpt (types.nullOr types.package) null;
+
+    # Add trusted OWNER/REPO[/SUBDIR] sources here. Herdr owns versions and
+    # builds; `herdr plugin update --yes` rolls them forward independently.
+    # Removing an entry does not uninstall it or delete its user data.
+    plugins = mkOpt (types.listOf types.str) [ ];
   };
 
   config = mkIf cfg.enable {
@@ -52,29 +42,24 @@ in {
         ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/config.toml"} $out
       '';
 
-    # Register the nix-built plugin with herdr. `plugin link` doesn't build
-    # (we already did) and is idempotent: re-linking the same plugin id
-    # updates the registered plugin root, so plugin updates converge on the
-    # next rebuild. The registry (plugins.json) stays herdr-managed runtime
-    # state, so we don't touch it directly.
-    home-manager.users.${config.user.name} = { lib, ... }: {
-      # After installPackages, so a herdr from `home.packages` is on disk by
-      # the time we shell out to it.
-      home.activation.herdrJjWorkspacePlugin =
-        lib.hm.dag.entryAfter [ "installPackages" ] ''
-          herdrBin=${optionalString (cfg.package != null) "${cfg.package}/bin/herdr"}
-          if [ -z "$herdrBin" ]; then
-            herdrBin="$(command -v herdr || true)"
-          fi
-          if [ -z "$herdrBin" ] && [ -x /opt/homebrew/bin/herdr ]; then
-            herdrBin=/opt/homebrew/bin/herdr
-          fi
-          if [ -n "$herdrBin" ]; then
-            run "$herdrBin" plugin link ${jjWorkspacePluginDir}
-          else
-            echo "herdr not found; skipping jj-workspace plugin link"
-          fi
-        '';
+    home-manager.users.${config.user.name} = { lib, ... }: mkIf (cfg.plugins != [ ]) {
+      home.activation.herdrPlugins = lib.hm.dag.entryAfter [ "installPackages" ] ''
+        herdrBin=${optionalString (cfg.package != null) "${cfg.package}/bin/herdr"}
+        if [ -z "$herdrBin" ]; then
+          herdrBin="$(command -v herdr || true)"
+        fi
+        if [ -z "$herdrBin" ] && [ -x "$HOME/.local/bin/herdr" ]; then
+          herdrBin="$HOME/.local/bin/herdr"
+        fi
+        if [ -z "$herdrBin" ] && [ -x /opt/homebrew/bin/herdr ]; then
+          herdrBin=/opt/homebrew/bin/herdr
+        fi
+        if [ -z "$herdrBin" ]; then
+          echo "herdr not found; cannot install declared plugins" >&2
+          exit 1
+        fi
+        run ${lib.getExe installPlugins} "$herdrBin" ${escapeShellArgs cfg.plugins}
+      '';
     };
   };
 }

@@ -1,4 +1,4 @@
-{ user, pkgs, lib, ... }:
+{ config, user, pkgs, lib, ... }:
 {
     # Determinate already manages the Nix daemon, so nix-darwin shouldn't.
   nix.enable = false;
@@ -72,6 +72,21 @@
     # AGENTS.md / CLAUDE.md pointing agents at the Obsidian vault; KRONOS
     # overrides the role to "work" in flake.nix.
     dev.coding-agents.enable = true;
+    # Verified personal plugins on Damocles only; KRONOS shares this module
+    # but must not acquire private plugins or opt into tracing/editor changes.
+    dev.coding-agents.piPackages = lib.optionals
+      (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") [
+        "git:github.com/kylesnowschwartz/pi-bionic-reading@88e912e677321de293543af4d5a77e2325eaa24e"
+        "npm:@langchain/langsmith-pi-extension@0.2.1"
+        "git:git@github.com:jack-michaud/pi-nvim.git@2723c28f0fb1b7bc165aa01a0f7fc55f333b312c"
+      ];
+    dev.coding-agents.piPackageAliases = lib.optionalAttrs
+      (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") {
+        "../../Code/github.com/kylesnowschwartz/pi-bionic-reading" =
+          "git:github.com/kylesnowschwartz/pi-bionic-reading";
+        "/Users/${user}/Code/github.com/kylesnowschwartz/pi-bionic-reading" =
+          "git:github.com/kylesnowschwartz/pi-bionic-reading";
+      };
     # Current Go toolchain (go + gopls) from nixpkgs. The system Go at
     # /usr/local/bin/go is 1.11 (2018) and cannot build modern Go modules.
     # KRONOS gets it too since it reuses this config.
@@ -94,6 +109,14 @@
       tmux.enable = true;
       zsh.enable = true;
       herdr.enable = true;
+      # Add trusted GitHub plugins here; activation runs missing entries via
+      # `herdr plugin install --yes`. Herdr owns versions and later updates.
+      herdr.plugins = [
+        "NathanFlurry/herdr-plugin-jj-workspace"
+      ] ++ lib.optionals (config.environment.variables.NIX_FLAKE_HOST == "DAMOCLES") [
+        # Add personal plugins to this list (not shared with KRONOS).
+        "eliasstravik/herdr-projects"
+      ];
     };
     desktop = {
       terminals.alacritty.enable = true;

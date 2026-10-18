@@ -111,13 +111,14 @@ in
     # herdr's config module never installs the herdr binary — on darwin that
     # comes from Homebrew. On Linux take it from the `unstable` overlay
     # (nixpkgs master), which tracks a newer herdr than the pinned nixpkgs
-    # ships. Setting `package` also makes the plugin-link activation reference
+    # ships. Setting `package` also makes the plugin-install activation reference
     # the store path directly: home-manager's activation script replaces PATH
     # with a fixed set of store paths, so a `command -v herdr` lookup there
     # would never find the profile-installed binary.
     modules.shells.herdr = {
       enable = true;
       package = pkgs.unstable.herdr;
+      plugins = [ "NathanFlurry/herdr-plugin-jj-workspace" ];
     };
     modules.dev.coding-agents = {
       enable = true;
