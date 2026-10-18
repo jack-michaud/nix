@@ -43,6 +43,12 @@
       flake = false;
     };
 
+    # Match the verified Damocles installation, not the moving release launcher.
+    herdr-projects = {
+      url = "github:eliasstravik/herdr-projects/c88ae8ad64378dfffb9360145e1e72f32b7d47d6";
+      flake = false;
+    };
+
   };
   outputs = inputs@{ self, nixpkgs, nix-darwin, nixpkgs-git, home-manager,... }:
     let

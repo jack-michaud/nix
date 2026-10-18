@@ -69,6 +69,23 @@
         "type": "github"
       }
     },
+    "herdr-projects": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792244817,
+        "narHash": "sha256-8BZXCEk0s9uSLnK+cq9UM8bxuht2GcE7iOyfSkL07VQ=",
+        "owner": "eliasstravik",
+        "repo": "herdr-projects",
+        "rev": "c88ae8ad64378dfffb9360145e1e72f32b7d47d6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "eliasstravik",
+        "repo": "herdr-projects",
+        "rev": "c88ae8ad64378dfffb9360145e1e72f32b7d47d6",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -165,6 +182,7 @@
         "agent-harness": "agent-harness",
         "comment-trainer": "comment-trainer",
         "herdr-plugin-jj-workspace": "herdr-plugin-jj-workspace",
+        "herdr-projects": "herdr-projects",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",

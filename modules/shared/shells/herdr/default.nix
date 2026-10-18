@@ -29,6 +29,29 @@ let
     cp ${jjWorkspaceSrc}/herdr-plugin.toml $out/herdr-plugin.toml
     ln -s ${jjWorkspace}/bin/jj-workspace $out/target/release/jj-workspace
   '';
+
+  projectsSrc = inputs.herdr-projects;
+  projects = pkgs.rustPlatform.buildRustPackage {
+    pname = "herdr-projects";
+    version = "1.2.2-${projectsSrc.shortRev}";
+    src = projectsSrc;
+    cargoLock.lockFile = projectsSrc + "/Cargo.lock";
+    # Upstream's integration tests drive git, herdr, agents and user state.
+    # Building the plugin must not require a running Herdr server.
+    doCheck = false;
+  };
+  projectsPluginDir = pkgs.runCommandLocal "herdr-projects-plugin-dir" { } ''
+    mkdir -p $out/bin
+    cp ${projectsSrc}/herdr-plugin.toml $out/herdr-plugin.toml
+    # Preserve the manifest's command interface, but never download a moving
+    # release or write binaries into the immutable plugin directory at runtime.
+    cat > $out/bin/run.sh <<'EOF'
+    #!${pkgs.runtimeShell}
+    if [ "''${1-}" = --fetch ]; then exit 0; fi
+    exec ${projects}/bin/herdr-projects "$@"
+    EOF
+    chmod +x $out/bin/run.sh
+  '';
 in {
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
@@ -39,6 +62,10 @@ in {
     # script overwrites PATH with a fixed set of store paths (the user profile
     # is never on it), so a PATH lookup can't find a nix-installed herdr.
     package = mkOpt (types.nullOr types.package) null;
+
+    # The work board is opt-in: enabling Herdr on another host must not also
+    # install a board that can launch agents there.
+    projects.enable = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {
@@ -71,8 +98,11 @@ in {
           fi
           if [ -n "$herdrBin" ]; then
             run "$herdrBin" plugin link ${jjWorkspacePluginDir}
+            ${optionalString cfg.projects.enable ''
+              run "$herdrBin" plugin link ${projectsPluginDir}
+            ''}
           else
-            echo "herdr not found; skipping jj-workspace plugin link"
+            echo "herdr not found; skipping declarative plugin links"
           fi
         '';
     };
