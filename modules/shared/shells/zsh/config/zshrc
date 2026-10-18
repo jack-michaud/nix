@@ -155,3 +155,13 @@ unset _hm_vars
 
 # Machine-local overrides and secret env vars (not tracked in nix config)
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
+
+# Added by cua-driver-rs installer — see https://github.com/trycua/cua
+export PATH="/Users/Jack/.local/bin:$PATH"
+
+# added by harness installer
+export PATH="$HOME/.local/bin:$PATH"
+
+# >>> railway initialize >>>
+source "$HOME/.railway/env"
+# <<< railway initialize <<<

@@ -45,6 +45,28 @@ type = "plugin_action"
 command = "nathanflurry.jj-workspace.remove"
 description = "remove jj workspace"
 
+# Voice runs directly under Alacritty for macOS microphone permission, while
+# retaining the invoking Herdr session. Shift+V leaves prefix+v (split) intact.
+[[keys.command]]
+key = "prefix+shift+v"
+type = "shell"
+command = '"$HOME/.local/bin/herdr-voice-local"'
+description = "start local voice (Alacritty)"
+
+# >>> herdr-projects key (added by the herdr-projects plugin; `herdr-projects remove-extras` removes it)
+[[keys.command]]
+key = "prefix+y"
+type = "plugin_action"
+command = "herdr-projects.open"
+description = "work board"
+# <<< herdr-projects key
+
+[[keys.command]]
+key = "prefix+ctrl+k"
+type = "plugin_action"
+command = "herdr-bar.open"
+description = "command bar"
+
 [theme]
 # Inherit the host terminal palette — Monokai Pro, defined once in
 # modules/shared/desktop/terminals/alacritty/config/alacritty.toml.
@@ -67,3 +89,11 @@ delivery = "herdr"
 
 [ui.sound]
 enabled = true
+
+# >>> herdr-projects sidebar (added by the herdr-projects plugin; `herdr-projects remove-extras` removes it)
+[ui.sidebar.agents]
+rows = [["state_icon", "machine", "workspace", { token = "tab", rules = [{ equals = "Agent", hide = true }, { starts_with = "Reviewer #", hide = true }] }], ["agent"], [{ token = "$summary", dim = true }, "$progress"]]
+
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"], ["branch", "git_status"], [{ token = "$summary", dim = true }, "$progress"]]
+# <<< herdr-projects sidebar
