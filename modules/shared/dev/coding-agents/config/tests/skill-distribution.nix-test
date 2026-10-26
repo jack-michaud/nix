@@ -1,0 +1,32 @@
+# Evaluate the actual Darwin module graph, not a fabricated host or activation.
+# Invoke as documented in ../../README.md, passing the worktree's flake.
+{ flake, host ? "DAMOCLES", user ? "Jack" }:
+let
+  system = flake.darwinConfigurations.${host};
+  cfg = system.config;
+  files = cfg.home-manager.users.${user}.home.file;
+  pi = ".pi/agent/skills/herdr-orchestration";
+  prime = ".prime/agent/skills/herdr-orchestration";
+  disabled = system.extendModules {
+    modules = [{ modules.dev.coding-agents.piSkills = flake.inputs.nixpkgs.lib.mkForce [ ]; }];
+  };
+  disabledFiles = disabled.config.home-manager.users.${user}.home.file;
+  source = "${cfg.dotfiles.modulesDir}/shared/dev/coding-agents/config/skills/herdr-orchestration";
+in
+assert cfg.modules.dev.coding-agents.enable;
+assert cfg.modules.dev.coding-agents.piSkills == [ "herdr-orchestration" ];
+assert files.${pi}.source == files.${prime}.source;
+assert !(builtins.hasAttr ".agents/skills/herdr-orchestration" files);
+assert !(builtins.hasAttr pi disabledFiles);
+assert builtins.hasAttr prime disabledFiles;
+assert builtins.length (builtins.filter
+  (name: builtins.match ".pi/agent/skills/.*" name != null)
+  (builtins.attrNames files)) == 1;
+{
+  inherit host user source;
+  piTarget = files.${pi}.target;
+  primeTarget = files.${prime}.target;
+  sourceDerivation = toString files.${pi}.source;
+  piOptOutKeepsPrime = true;
+  onePiDistributionMechanism = true;
+}
