@@ -5,6 +5,7 @@ import re
 import shlex
 import subprocess
 import unittest
+from unittest.mock import patch
 
 CONFIG = Path(__file__).resolve().parents[1]
 SKILL = CONFIG / "skills/herdr-orchestration"
@@ -73,12 +74,44 @@ class SkillContractTest(unittest.TestCase):
     def test_shell_examples_parse_and_do_not_bypass_or_operate(self):
         blocks = re.findall(r'```bash\n(.*?)```', ALL, re.S)
         self.assertGreater(len(blocks), 5)
-        forbidden = r'(?im)^\s*(?:unset\s|export\s+HERDR_|env\s+-u|.*\b(?:sudo|switch|restart|send-keys|--delegate|--resume)\b)'
+        # A word boundary cannot start a whitespace-prefixed --flag. Match flags
+        # separately, excluding word/hyphen prefixes and suffixes (e.g. --resume-extra).
+        forbidden = (
+            r'(?im)^\s*(?:unset\s|export\s+HERDR_|env\s+-u|'
+            r'.*(?:\b(?:sudo|switch|restart|send-keys)\b|'
+            r'(?<![\w-])--(?:delegate|resume)(?![\w-])))'
+        )
         for block in blocks:
             self.assertNotRegex(block, forbidden)
             subprocess.run(['bash', '-n'], input=block, text=True, check=True, capture_output=True)
         self.assertEqual(sum('coordinator tell "$relay"' in b for b in blocks), 1)
         self.assertNotRegex('\n'.join(blocks), r'(?m)^.*(?:board|herdr-projects).*\b(?:set|unset|add|delegate|approve)\s')
+
+
+class SafetyLintRegressionTest(unittest.TestCase):
+    def lint_with_example(self, example):
+        # Inject inert documentation only; bash -n parses but never executes it.
+        document = ALL + '\n```bash\n' + example + '\n```\n'
+        with patch.dict(globals(), {'ALL': document}):
+            SkillContractTest().test_shell_examples_parse_and_do_not_bypass_or_operate()
+
+    def test_forbidden_examples_are_rejected_by_actual_document_lint(self):
+        for example in [
+            'pi --resume "$live_session"',
+            'pi --resume="$live_session"',
+            'pi "--resume" "$live_session"',
+            '  pi\t--resume "$live_session"',
+            'helper --delegate "$task"',
+            'unset HERDR_PANE_ID',
+        ]:
+            with self.subTest(example=example):
+                with self.assertRaisesRegex(AssertionError, 'Regex matched'):
+                    self.lint_with_example(example)
+
+    def test_safe_flag_prefixes_are_not_rejected_as_exact_forbidden_flags(self):
+        for example in ["printf '%s\\n' --resume-extra", "printf '%s\\n' --delegate-extra"]:
+            with self.subTest(example=example):
+                self.lint_with_example(example)
 
 
 @unittest.skipUnless(os.environ.get('HERDR_CLI_CHECKS') == '1', 'opt in to installed help/version checks')
