@@ -48,11 +48,18 @@ let
   # the checkout (the same out-of-store trick the rules use), so editing a skill
   # applies to the next agent session without a rebuild. The set is read off the
   # filesystem, so adding a skill needs no edit to this file.
-  mkAgentSkill = name: {
-    ".prime/agent/skills/${name}".source = pkgs.runCommandLocal name { } ''
+  # Pi gets an explicit subset: many existing skills need Prime's Python
+  # kernel, and publishing all of them would shadow independently installed skills.
+  # Use Pi's native directory, not a second package or .agents installation.
+  mkAgentSkill = name:
+    let source = pkgs.runCommandLocal name { } ''
       ln -s ${escapeShellArg "${configDir}/skills/${name}"} $out
     '';
-  };
+    in {
+      ".prime/agent/skills/${name}".source = source;
+    } // optionalAttrs (elem name cfg.piSkills) {
+      ".pi/agent/skills/${name}".source = source;
+    };
   skillNames = attrNames
     (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/skills));
 
@@ -139,6 +146,9 @@ in {
     role = mkOpt types.str "personal";
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
+    # Selected shared instruction-only skills for Pi's native discovery. Hosts
+    # may opt out with [] without changing Prime's existing skill distribution.
+    piSkills = mkOpt (types.listOf (types.enum skillNames)) [ "herdr-orchestration" ];
     # Pi reconciles these sources on startup, just like the existing compaction
     # package. Keep machine-specific/private packages opt-in at the host level.
     piPackages = mkOpt (types.listOf types.str) [ ];
