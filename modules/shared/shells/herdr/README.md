@@ -95,6 +95,12 @@ lookup is this-time (autopilot only) → coordinator's own → you → built in.
 keys use the nearest answer; instructions add `you`, then own, separated by two
 newlines. An explicit runtime `none` suppresses broader instructions. Scoped
 `none` therefore refuses an addition rather than silently losing that suppression.
+The helper matches 1.2.26 `values.rs::Ty::Text`: trim Unicode White_Space at
+both ends, canonicalize case-insensitive `none`, and refuse whitespace-only text.
+Thus saved `" NONE "` still suppresses defaults. Raw instruction bytes remain
+separate for ownership and before/proposed-own hashes; effective preview hashes
+and scoped readback use normalized text before additive joining. Python's extra
+U+001C–U+001F strip characters are deliberately not trimmed, matching Rust.
 
 Preview ownership is one `nix:herdr-projects:instructions:v1` marked block **inside
 the individual instruction value**, never the file/tree. Existing owner reporting

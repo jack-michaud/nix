@@ -17,10 +17,25 @@ KEY = "coordinator.instructions"
 OPEN = "<!-- nix:herdr-projects:instructions:v1 -->"
 CLOSE = "<!-- /nix:herdr-projects:instructions:v1 -->"
 SUPPORTED = "1.2.26"
+# Rust str::trim uses Unicode White_Space, unlike Python's broader str.strip
+# (which also strips U+001C..U+001F). Match values.rs::Ty::Text exactly.
+TEXT_WHITESPACE = "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
 
 
 class Refused(ValueError):
     pass
+
+
+def normalized_text(text):
+    """Projects 1.2.26 Ty::Text semantics, separate from raw byte ownership."""
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        raise Refused("Malformed instruction text")
+    trimmed = text.strip(TEXT_WHITESPACE)
+    if not trimmed:
+        raise Refused("Instructions need words or none; whitespace-only runtime text is invalid")
+    return "none" if trimmed.lower() == "none" else trimmed
 
 
 def digest(value):
@@ -61,11 +76,11 @@ def validate_manifest(value):
             text = settings[KEY]
             if not isinstance(text, str) or "\x00" in text or len(text.encode()) > 48000:
                 raise Refused("Instructions must be nonsecret text of at most 48000 bytes")
-            if text and (not text.strip() or text.strip() == "none"):
+            if text and normalized_text(text) == "none":
                 raise Refused("Use empty text to remove our block; none/reset semantics are not managed")
             if OPEN in text or CLOSE in text:
                 raise Refused("Reserved management marker in declaration")
-    shared = scopes.get("defaults", {}).get(KEY, "").strip()
+    shared = scopes.get("defaults", {}).get(KEY, "").strip(TEXT_WHITESPACE)
     if shared:
         for scope, settings in scopes.items():
             if scope != "defaults" and shared in settings.get(KEY, ""):
@@ -86,6 +101,7 @@ def at_scope(config, scope):
 
 
 def own(config, scope):
+    """Keep raw text for ownership/hashes; validate without discarding its bytes."""
     at = at_scope(config, scope)
     nested = at.get("coordinator", {})
     if not isinstance(nested, dict):
@@ -96,6 +112,7 @@ def own(config, scope):
     text = at.get(KEY, nested.get("instructions"))
     if present and not isinstance(text, str):
         raise Refused("Malformed runtime instructions")
+    normalized_text(text)
     return text
 
 
@@ -110,7 +127,8 @@ def all_scopes(config):
 
 
 def compose(old, addition, scope):
-    """Pure preview only. Preserve all unmanaged bytes, including reporting rules."""
+    """Pure raw preview; interpret reset tokens using the board's text semantics."""
+    normalized_old = normalized_text(old)
     if addition is None:
         return old
     text = old or ""
@@ -129,15 +147,16 @@ def compose(old, addition, scope):
         return (text[:start] + text[end:]) or None
     if not addition:
         return old
-    if old == "none" and scope != "defaults":
+    if normalized_old == "none" and scope != "defaults":
         raise Refused("Scoped none suppresses broader instructions; cannot safely append")
-    base = "" if old == "none" else text
+    base = "" if normalized_old == "none" else text
     return base + ("\n\n" if base else "") + OPEN + "\n" + addition + "\n" + CLOSE
 
 
 def effective(default, local=None):
     parts = []
-    for text in (default, local):
+    for raw in (default, local):
+        text = normalized_text(raw)
         if text == "none":
             parts.clear()
         elif text is not None:

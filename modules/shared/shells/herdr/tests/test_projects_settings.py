@@ -46,7 +46,20 @@ elif "--project-coordinator" in args:
     place = "coord"
 raw = local.get("coordinator", {}).get("instructions")
 default = config.get("coordinator", {}).get("instructions")
-parts = [v for v in ([default] if local is config else [default, raw]) if v is not None]
+# Independent source-contract model of values.rs::Ty::Text and lookup.rs.
+# Rust Unicode White_Space is narrower than Python's default strip set.
+whitespace = "".join(chr(cp) for cp in [9, 10, 11, 12, 13, 32, 133, 160, 5760,
+                                     *range(8192, 8203), 8232, 8233, 8239, 8287, 12288])
+parts = []
+for value in ([default] if local is config else [default, raw]):
+    if value is None:
+        continue
+    checked = value.strip(whitespace)
+    assert checked, "invalid runtime text"
+    if checked.lower() == "none":
+        parts.clear()
+    else:
+        parts.append(checked)
 effective = "\\n\\n".join(parts) if parts else "none"
 if raw is None:
     place = "you" if default is not None else "builtin"
@@ -124,6 +137,80 @@ class SettingsTest(unittest.TestCase):
         with self.assertRaises(settings.Refused):
             settings.compose("none", "addition", "main")
         self.assertEqual(settings.compose("none", "", "main"), "none")
+
+    def test_normalized_reset_tokens_refuse_scoped_additions_without_losing_raw_text(self):
+        for token in ("none", " NONE ", "NoNe", "\u2003NoNe\u2029"):
+            with self.subTest(token=token):
+                self.assertEqual(settings.normalized_text(token), "none")
+                self.assertEqual(settings.effective("shared", token), "none")
+                self.assertEqual(settings.compose(token, None, "main"), token)
+                self.assertEqual(settings.compose(token, "", "main"), token)
+                with self.assertRaises(settings.Refused):
+                    settings.compose(token, "addition", "main")
+                config = copy.deepcopy(self.config)
+                config["coordinators"]["main"]["coordinator"]["instructions"] = token
+                row = next(r for r in settings.preview(manifest(), config)["scopes"] if r["scope"] == "main")
+                self.assertEqual(row["proposedEffectiveHash"], settings.digest("none"))
+                self.assertEqual(row["proposedOwnHash"], settings.digest(token))
+                self.assertFalse(row["change"])
+                with self.assertRaises(settings.Refused):
+                    settings.preview(manifest(main="addition"), config)
+                self.assertNotIn(token, settings.compose(token, "addition", "defaults"))
+        for token in (" NONE ", "NoNe", "\u2003NONE\u2029"):
+            with self.subTest(declaration=token), self.assertRaises(settings.Refused):
+                settings.validate_manifest(manifest(main=token))
+
+    def test_normalized_effective_preview_preserves_unmanaged_raw_bytes(self):
+        raw = " \towner reporting policy\n"
+        config = copy.deepcopy(self.config)
+        config["coordinator"]["instructions"] = raw
+        config["coordinators"]["main"]["coordinator"]["instructions"] = "\u2003local policy\n"
+        before = copy.deepcopy(config)
+        rows = {r["scope"]: r for r in settings.preview(manifest(), config)["scopes"]}
+        self.assertEqual(settings.own(config, "defaults"), raw)
+        self.assertEqual(rows["defaults"]["beforeHash"], settings.digest(raw))
+        self.assertEqual(rows["defaults"]["proposedOwnHash"], settings.digest(raw))
+        self.assertFalse(rows["defaults"]["change"])
+        self.assertEqual(rows["defaults"]["proposedEffectiveHash"], settings.digest("owner reporting policy"))
+        self.assertEqual(rows["main"]["proposedEffectiveHash"], settings.digest("owner reporting policy\n\nlocal policy"))
+        composed = settings.compose(raw, "managed addition", "defaults")
+        self.assertTrue(composed.startswith(raw + "\n\n"))
+        self.assertEqual(settings.compose(composed, "", "defaults"), raw)
+        self.assertEqual(config, before)
+
+    def test_rust_whitespace_contract_and_invalid_empty_text(self):
+        self.assertEqual(settings.normalized_text("\u0085\u00a0\u1680\u200aPolicy\u202f\u205f\u3000"), "Policy")
+        # Python strip would drop these control characters; Rust trim does not.
+        self.assertEqual(settings.normalized_text("\x1cNONE\x1f"), "\x1cNONE\x1f")
+        for text in ("", " \n\t", "\u2003\u2029"):
+            with self.subTest(text=text), self.assertRaises(settings.Refused):
+                settings.effective(text)
+            config = {"coordinator": {"instructions": text}}
+            with self.assertRaises(settings.Refused):
+                settings.preview(manifest(), config)
+
+    def test_readback_accepts_normalized_text_and_reset_provenance(self):
+        self.declaration.write_text(json.dumps(manifest()))
+        for default, local, expected in [
+                (" owner reporting policy\n", None, "owner reporting policy"),
+                ("\u2003owner policy\n", "\tlocal policy\u2029", "owner policy\n\nlocal policy"),
+                (" owner policy ", " NONE ", "none"),
+                ("\u2003NoNe\u2029", " local policy ", "local policy"),
+                (" NoNe ", None, "none"),
+                ("\x1cNONE\x1f", None, "\x1cNONE\x1f")]:
+            with self.subTest(default=default, local=local):
+                config = copy.deepcopy(self.config)
+                config["coordinator"]["instructions"] = default
+                config["coordinators"]["main"] = {} if local is None else {"coordinator": {"instructions": local}}
+                self.runtime.write_text(json.dumps(config))
+                before = self.runtime.read_bytes()
+                result = self.run_helper("readback")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                main = next(r for r in json.loads(result.stdout)["scopes"] if r["scope"] == "main")
+                self.assertEqual(main["effectiveHash"], settings.digest(expected))
+                self.assertEqual(self.runtime.read_bytes(), before)
+                rejected = self.run_helper("readback", MODE="wrong-scope")
+                self.assertNotEqual(rejected.returncode, 0)
 
     def test_machine_is_not_parent_of_project_settings(self):
         declared = manifest(defaults="D", machine="M", **{"project:dotfiles": "P"})
