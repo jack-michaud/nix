@@ -18,6 +18,8 @@ let
     '' + builtins.readFile ./config/install-plugins.sh;
   };
 in {
+  imports = [ ./_projects.nix ];
+
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
 
