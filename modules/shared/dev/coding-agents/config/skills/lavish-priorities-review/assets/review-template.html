@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{TITLE}}</title>
+<style>
+:root { color-scheme: light dark; --paper:#faf7ec; --card:#fffdf5; --ink:#233d32; --muted:#4c6255; --leaf:#246345; --line:#a5b99d; --sun:#f7e8ac; }
+@media (prefers-color-scheme:dark) {
+  :root { --paper:#15251f; --card:#1e3228; --ink:#ecf1df; --muted:#c2d1bf; --leaf:#ade2b1; --line:#6c9177; --sun:#3e4027; }
+}
+* { box-sizing:border-box; min-width:0; }
+body { margin:0; background:var(--paper); color:var(--ink); font:1.05rem/1.65 system-ui,sans-serif; overflow-wrap:anywhere; }
+main { max-width:72rem; padding:clamp(1rem,4vw,3rem); margin:auto; }
+header { padding:1.5rem 0; border-bottom:2px solid var(--leaf); }
+h1 { font:clamp(2rem,5vw,3.4rem)/1.12 Georgia,serif; margin:.5rem 0 1rem; }
+h2 { font:1.6rem/1.3 Georgia,serif; margin:0 0 .8rem; }
+h3 { font-size:1.1rem; margin:0 0 .5rem; }
+p { margin:.5rem 0; }
+.eyebrow { color:var(--leaf); font-weight:700; letter-spacing:.06em; }
+.notice { background:var(--sun); border:1px solid var(--line); padding:1rem; border-radius:.8rem; }
+.grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin:1rem 0; }
+section { border:1px solid var(--line); background:var(--card); padding:clamp(1rem,3vw,1.5rem); border-radius:1rem; margin:1rem 0; }
+.grid section { margin:0; }
+ol,ul { padding-left:1.5rem; }
+li { margin:.6rem 0; }
+.placeholder { color:var(--muted); }
+a { color:var(--leaf); text-underline-offset:.2em; }
+summary { cursor:pointer; min-height:44px; padding:.5rem; font-weight:700; }
+:focus-visible { outline:3px solid var(--leaf); outline-offset:4px; }
+code,pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+footer { color:var(--muted); padding:1rem 0; }
+@media (max-width:40rem) { .grid { grid-template-columns:minmax(0,1fr); } }
+@media print { section { break-inside:avoid; } body { background:white; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="eyebrow">A little room to choose what matters</p>
+<h1>{{TITLE}}</h1>
+<p><strong>Scope:</strong> {{SCOPE}}</p>
+<p class="notice"><strong>Unfinished scaffold — not a board snapshot.</strong> Replace every bracketed instruction with verified evidence before opening a review. No dates, totals or progress are implied.</p>
+</header>
+<section aria-labelledby="accomplishments">
+<h2 id="accomplishments">What moved forward</h2>
+<p class="placeholder">[Accomplishments since the last verified check-in, with evidence. Separate preparation and tests from delivered or live-verified work.]</p>
+</section>
+<section aria-labelledby="priorities">
+<h2 id="priorities">A short priority sequence</h2>
+<ol>
+<li><h3>[First focus]</h3><p class="placeholder">[Why now; exact next action and owner; condition that must hold first.]</p></li>
+<li><h3>[Next focus]</h3><p class="placeholder">[Why next; what is deliberately not being started yet.]</p></li>
+<li><h3>[Later, if needed]</h3><p class="placeholder">[Optional focus, not a delivery promise. Remove unused items.]</p></li>
+</ol>
+</section>
+<div class="grid">
+<section aria-labelledby="status"><h2 id="status">Current verified status</h2><p class="placeholder">[Snapshot time and machine coverage; current evidence versus stale board rows; queued, dependency-waiting and actually running work.]</p></section>
+<section aria-labelledby="needs"><h2 id="needs">Next owner needs</h2><p class="placeholder">[One real decision per ask, grouped across related rows. State whether the human must act or nobody needs to act. Reconcile prior answers first.]</p></section>
+<section aria-labelledby="parked"><h2 id="parked">Explicitly parked</h2><p class="placeholder">[Projects left alone and why. Parked does not mean forgotten or failed.]</p></section>
+<section aria-labelledby="dependencies"><h2 id="dependencies">Conditional dependencies</h2><p class="placeholder">[If/then conditions, prerequisite owner and evidence required to proceed; no invented dates.]</p></section>
+</div>
+<section aria-labelledby="uncertainty"><h2 id="uncertainty">What remains uncertain</h2><p class="placeholder">[Remaining work, omitted or unreachable machines, unresolved evidence and honest timing uncertainty. Zero asks or passing tests do not establish global completion.]</p></section>
+<section aria-labelledby="feedback"><h2 id="feedback">Review together</h2>
+<p>[Before opening: explain that annotations or queued prompts become submitted feedback only after Send to Agent. Prioritization is not blanket execution or security approval.]</p>
+<p class="placeholder">[Replace with verified poll status: active foreground wait, paused between polls, failed, or ended. Do not promise continuous monitoring without a proven wake path.]</p>
+<p>No form here submits feedback. In an open Lavish review use its annotation and Send controls; offline this is a read-only report.</p>
+</section>
+<section aria-labelledby="evidence"><h2 id="evidence">Evidence and prior answers</h2>
+<details><summary>Sources, freshness and decisions already answered</summary>
+<p class="placeholder">[Supported commands and versions; machine reachability; local versus all-machine scope; source links and capture times; previous answers with provenance and superseded history. Avoid secrets or unnecessary inventory.]</p>
+</details>
+<details><summary>Feedback and handoff trail</summary>
+<p class="placeholder">[Submitted → forwarded → accepted → applied → independently verified are distinct. Link private raw captures/journal, not private wording in public Git. Record actual actions separately. Preserve canonical report URL and end attribution.]</p>
+</details>
+</section>
+<footer>Light solarpunk scaffold · self-contained, no remote assets · populate from evidence, not assumptions</footer>
+</main>
+</body>
+</html>
