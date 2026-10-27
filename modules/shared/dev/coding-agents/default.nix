@@ -154,6 +154,12 @@ in {
       ".agents/AGENTS.md".source = agentsMd;
       ".claude/CLAUDE.md".source = agentsMd;
       ".prime/agent/AGENTS.md".source = agentsMd;
+      # Pi natively discovers neutral skills here. Keep this link specific:
+      # broad skill fan-out and package/settings changes are separate work.
+      ".agents/skills/lavish-priorities-review".source =
+        pkgs.runCommandLocal "lavish-priorities-review-neutral" { } ''
+          ln -s ${escapeShellArg "${configDir}/skills/lavish-priorities-review"} $out
+        '';
       # pi has no native rules dir; this extension implements the same
       # contract (frontmatter `paths` triggers) over ~/.agents/rules.
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
