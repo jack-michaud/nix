@@ -160,6 +160,11 @@ in {
         pkgs.runCommandLocal "lavish-priorities-review-neutral" { } ''
           ln -s ${escapeShellArg "${configDir}/skills/lavish-priorities-review"} $out
         '';
+      # Pi-specific instructions stay separate from the shared agent context.
+      # Keep them live-linked so edits apply without a rebuild.
+      ".pi/agent/AGENTS.md".source = pkgs.runCommandLocal "pi-AGENTS.md" { } ''
+        ln -s ${escapeShellArg "${configDir}/pi/AGENTS.md"} $out
+      '';
       # pi has no native rules dir; this extension implements the same
       # contract (frontmatter `paths` triggers) over ~/.agents/rules.
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''

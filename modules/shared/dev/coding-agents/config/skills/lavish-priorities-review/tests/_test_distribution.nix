@@ -51,6 +51,9 @@ assert builtins.all (name: lib.hasInfix "ln -s ${target}${name} $out"
 assert lib.hasInfix "ln -s ${target}lavish-priorities-review $out" files.${neutralName}.source.script;
 assert files.${neutralName}.source.name == "lavish-priorities-review-neutral";
 assert (evaluate false).home.file == {};
+assert files.".pi/agent/AGENTS.md".source.name == "pi-AGENTS.md";
+assert lib.hasInfix "ln -s /mock/modules/shared/dev/coding-agents/config/pi/AGENTS.md $out"
+  files.".pi/agent/AGENTS.md".source.script;
 assert builtins.hasAttr ".pi/agent/extensions/agent-rules.ts" files;
 assert !(builtins.hasAttr ".pi/agent/settings.json" files);
 {
