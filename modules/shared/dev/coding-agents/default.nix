@@ -154,6 +154,11 @@ in {
       ".agents/AGENTS.md".source = agentsMd;
       ".claude/CLAUDE.md".source = agentsMd;
       ".prime/agent/AGENTS.md".source = agentsMd;
+      # Pi-specific instructions stay separate from the shared agent context.
+      # Keep them live-linked so edits apply without a rebuild.
+      ".pi/agent/AGENTS.md".source = pkgs.runCommandLocal "pi-AGENTS.md" { } ''
+        ln -s ${escapeShellArg "${configDir}/pi/AGENTS.md"} $out
+      '';
       # pi has no native rules dir; this extension implements the same
       # contract (frontmatter `paths` triggers) over ~/.agents/rules.
       ".pi/agent/extensions/agent-rules.ts".source = pkgs.runCommandLocal "agent-rules.ts" { } ''
