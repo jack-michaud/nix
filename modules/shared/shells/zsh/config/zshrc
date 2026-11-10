@@ -7,6 +7,14 @@
 # exports it), so entries pile up and compinit rescans the same dirs.
 typeset -U path fpath
 
+# Determinate installs this in /etc/zshrc, which only interactive zsh reads.
+# Non-login interactive shells (and anything that skipped ~/.zprofile) still
+# need it; the script is a no-op if a parent already sourced it.
+if [[ -z ${__ETC_PROFILE_NIX_SOURCED:-} && -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+
+
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 

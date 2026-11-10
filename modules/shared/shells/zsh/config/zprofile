@@ -1,0 +1,8 @@
+# Managed by nix: modules/shared/shells/zsh (symlinked to the live checkout).
+# Login zsh runs /etc/zprofile first, which rebuilds PATH via path_helper and
+# drops Determinate's nix unless it is in /etc/paths.d. Re-source after that
+# so `nix` is on PATH in Terminal, Cursor, and non-interactive login shells.
+if [[ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+  unset __ETC_PROFILE_NIX_SOURCED
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi

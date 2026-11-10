@@ -95,6 +95,7 @@
           # Per-machine user accounts, keyed by hostname.
           users = {
             DAMOCLES = "Jack";
+            AUTODESK = "michauj";
           };
         } // {
           # Work laptop: same config as DAMOCLES, but the account is `jack`.
