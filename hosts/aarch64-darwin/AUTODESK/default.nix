@@ -36,8 +36,14 @@
   homebrew = {
     enable = true;
     brews = [
+      "gh"
       "neovim"
       "herdr"
+      "agavra/tap/tuicr"  # TUI code-review tool from the agavra/tap third-party tap
+      "ffmpeg"
+      "fzf"
+      "awscli"
+      "tfenv"  # manages terraform versions; avoids homebrew-core's removal of terraform (BSL license)
     ];
   };
 
