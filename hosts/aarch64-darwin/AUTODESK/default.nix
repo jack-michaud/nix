@@ -42,6 +42,20 @@
   };
 
   modules = {
+    # jmos as a client of the jmosd on DAMOCLES, To Do's only. The token is
+    # this machine's secret JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`).
+    desktop.apps.jmos = {
+      enable = true;
+      server = {
+        # The house network name, not the tailnet one the task first named
+        # (damocles.bison-draconis.ts.net): Jack asked for this in the
+        # task's session on 2026-11-11. jmosd's TCP has no TLS, so on this
+        # path the token and the replicated data are not encrypted, and
+        # AUTODESK only connects while it is on the house network.
+        host = "DAMOCLES.house";
+        tokenKey = "JMOSD_TOKEN_AUTODESK";
+      };
+    };
     editors.nvim.enable = true;
     shells = {
       zsh.enable = true;
