@@ -47,7 +47,7 @@
     desktop.apps.jmos = {
       enable = true;
       server = {
-        host = "damocles.bison-draconis.ts.net";
+        host = "DAMOCLES.house";
         tokenKey = "JMOSD_TOKEN_AUTODESK";
       };
     };
