@@ -28,6 +28,19 @@
   '';
   home-manager.users.${user}.home.extraActivationPath = [ pkgs.nix ];
 
+  # System-level tools for the MaintainX skill-share repo. Its mise.toml
+  # installs the language toolchains (go, node, yarn, python, uv, shellcheck,
+  # lychee, rumdl), so only mise itself comes from nix here. awscli2 is for
+  # the AWS CodeArtifact credentials skill-share's yarn setup needs. git and
+  # gh are listed directly rather than via modules.dev.git, which also writes
+  # a personal git identity that does not belong on this work laptop.
+  user.packages = with pkgs; [
+    mise
+    git
+    gh
+    awscli2
+  ];
+
   nix-homebrew = {
     enable = true;
     autoMigrate = true;
