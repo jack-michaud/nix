@@ -42,6 +42,15 @@
   };
 
   modules = {
+    # jmos as a client of the jmosd on DAMOCLES, To Do's only. The token is
+    # this machine's secret JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`).
+    desktop.apps.jmos = {
+      enable = true;
+      server = {
+        host = "damocles.bison-draconis.ts.net";
+        tokenKey = "JMOSD_TOKEN_AUTODESK";
+      };
+    };
     editors.nvim.enable = true;
     shells = {
       zsh.enable = true;
