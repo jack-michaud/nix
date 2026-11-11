@@ -17,6 +17,23 @@ let
       export PATH="$PATH:/usr/bin:/bin"
     '' + builtins.readFile ./config/install-plugins.sh;
   };
+
+  # cursor-agent doesn't emit OSC 7501, so Herdr desktop never lists it as an
+  # agent (herdrdev/herdr-app#98). This mod's Cursor hooks emit it instead.
+  # Cursor's hook PATH may lack node, so pin the interpreter.
+  cursorStatusMod = pkgs.runCommandLocal "herdr-cursor-status" {
+    src = pkgs.fetchFromGitHub {
+      owner = "juliorr";
+      repo = "herdr-cursor-status";
+      rev = "147971e501580cb48b06931c0484e7f0357a5b5d";
+      hash = "sha256-0Ly01L8ONFAv/ZaArx5OW2U7gWOBfXXwwhvBcgMsDMc=";
+    };
+  } ''
+    cp -R $src/mods/cursor-status $out
+    chmod -R u+w $out
+    substituteInPlace $out/status.mjs \
+      --replace-fail '`node ''${shq(script)} hook`' '`${pkgs.nodejs}/bin/node ''${shq(script)} hook`'
+  '';
 in {
   options.modules.shells.herdr = {
     enable = mkBoolOpt false;
@@ -29,6 +46,11 @@ in {
     # builds; `herdr plugin update --yes` rolls them forward independently.
     # Removing an entry does not uninstall it or delete its user data.
     plugins = mkOpt (types.listOf types.str) [ ];
+
+    # List cursor-agent terminals in the Herdr desktop Agents panel. Merges
+    # into ~/.cursor/hooks.json; disabling leaves those entries behind
+    # (`node <mod>/status.mjs uninstall` removes them).
+    cursorStatus = mkBoolOpt false;
   };
 
   config = mkIf cfg.enable {
@@ -42,8 +64,19 @@ in {
         ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/config.toml"} $out
       '';
 
-    home-manager.users.${config.user.name} = { lib, ... }: mkIf (cfg.plugins != [ ]) {
-      home.activation.herdrPlugins = lib.hm.dag.entryAfter [ "installPackages" ] ''
+    home.file.".config/herdr-app/mods/cursor-status" = mkIf cfg.cursorStatus {
+      source = cursorStatusMod;
+    };
+
+    home-manager.users.${config.user.name} = { lib, ... }: {
+      # Idempotent; replaces its own entries from older store paths and keeps
+      # any other hooks in the file.
+      home.activation.herdrCursorStatus = mkIf cfg.cursorStatus
+        (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${pkgs.nodejs}/bin/node ${cursorStatusMod}/status.mjs install
+        '');
+
+      home.activation.herdrPlugins = mkIf (cfg.plugins != [ ]) (lib.hm.dag.entryAfter [ "installPackages" ] ''
         herdrBin=${optionalString (cfg.package != null) "${cfg.package}/bin/herdr"}
         if [ -z "$herdrBin" ]; then
           herdrBin="$(command -v herdr || true)"
@@ -59,7 +92,7 @@ in {
           exit 1
         fi
         run ${lib.getExe installPlugins} "$herdrBin" ${escapeShellArgs cfg.plugins}
-      '';
+      '');
     };
   };
 }

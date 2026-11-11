@@ -46,6 +46,7 @@
     shells = {
       zsh.enable = true;
       herdr.enable = true;
+      herdr.cursorStatus = true;
     };
   };
 }
