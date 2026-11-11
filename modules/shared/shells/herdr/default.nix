@@ -64,6 +64,16 @@ in {
         ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/config.toml"} $out
       '';
 
+    # Herdr desktop's keys.json: its defaults plus the config.toml bindings
+    # under the same ctrl+s prefix. The app reloads it live; uses macOS cmd keys.
+    # Forced because the app recreates a default keys.json whenever it's missing.
+    home.file.".config/herdr-app/keys.json" = mkIf pkgs.stdenv.isDarwin {
+      force = true;
+      source = pkgs.runCommandLocal "herdr-app-keys" { } ''
+        ln -s ${escapeShellArg "${config.dotfiles.modulesDir}/shared/shells/herdr/config/app-keys.json"} $out
+      '';
+    };
+
     home.file.".config/herdr-app/mods/cursor-status" = mkIf cfg.cursorStatus {
       source = cursorStatusMod;
     };
