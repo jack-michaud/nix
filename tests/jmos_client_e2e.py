@@ -13,12 +13,11 @@ until it is set up for this).
     PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=~/Code/github.com/jack-michaud/os/tests \
       python3 tests/jmos_client_e2e.py --config /nix/store/...-jmos-config.toml
 
-jmos 2.0.0 (source read at 9cd3dcd) fails this test at "[CONNECTED]": its edge sends the
-config's `${KEY}` text itself as the token instead of the secret (src/edge.rs,
-`hello["token"]`; only the probe in src/server_owns.rs resolves it). Until
-that is fixed in jmos, `--raw-reference-token` gives the temporary server the
-reference text as its token, so everything after the token is still driven.
-Never set a real server up that way: that text is in this repo, not a secret.
+A jmos before jmos#166 fails this test at "[CONNECTED]": its edge sent the
+config's `${KEY}` text itself as the token instead of the secret.
+`--raw-reference-token` shows that bug: it gives the temporary server the
+reference text as its token. Never set a real server up that way: that text
+is in this repo, not a secret.
 
 Run it through `av inject +KEY -- python3 …` (KEY as the config names it) to
 use the vault's secret for both the temporary server and the window.
