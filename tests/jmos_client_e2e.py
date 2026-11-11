@@ -20,6 +20,9 @@ that is fixed in jmos, `--raw-reference-token` gives the temporary server the
 reference text as its token, so everything after the token is still driven.
 Never set a real server up that way: that text is in this repo, not a secret.
 
+Run it through `av inject +KEY -- python3 …` (KEY as the config names it) to
+use the vault's secret for both the temporary server and the window.
+
 Needs pyte (the jmos repo's tests/requirements.txt) and that repo's PTY
 window harness (tests/harness/two_ui.py) on PYTHONPATH; it is only read.
 """
@@ -104,7 +107,9 @@ def main():
     address = server["url"][len("tcp://"):]
     host, port = address.rsplit(":", 1)
     listen = f"{socket.gethostbyname(host)}:{port}"
-    secret = server["token"] if args.raw_reference_token else TOKEN
+    # The secret the config names, when the caller supplies it (`av inject
+    # +KEY -- python3 …`); else a made-up one. Never printed.
+    secret = server["token"] if args.raw_reference_token else os.environ.get(key) or TOKEN
     print(f"config: [servers.{name}] {server['url']} space={server['space']} token=${{{key}}}")
 
     root = Path(tempfile.mkdtemp(prefix="jn-", dir="/tmp"))
@@ -151,7 +156,7 @@ def main():
             return win
 
         # --- a window with the right token -------------------------------
-        win = window("ok", TOKEN)
+        win = window("ok", secret)
         win.peek_for("MAIN MENU")
         try:  # an upgrade shows "What's new" once; close it
             win.peek_for("What's new in jmos", timeout=3)
