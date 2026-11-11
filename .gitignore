@@ -6,4 +6,6 @@ logs/
 # Claude Code session state (worktrees etc.)
 /.claude/
 __pycache__/
+# Local-only nvim AI action prompts
+/modules/shared/editors/nvim/config/lua/plugins/ai_actions.json
 
