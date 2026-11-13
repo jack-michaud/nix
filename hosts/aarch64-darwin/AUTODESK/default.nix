@@ -61,6 +61,8 @@
   };
 
   modules = {
+    # Apple clang must win for `cc`/`gcc` (e.g. native Ruby gems), so no Nix gcc.
+    dev.nixGcc.enable = false;
     # jmos as a client of the jmosd on DAMOCLES, To Do's only. The token is
     # this machine's secret JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`).
     desktop.apps.jmos = {
