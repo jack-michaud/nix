@@ -15,3 +15,12 @@ Maps of content (jumping-off points into the vault):
   specifically for coding agents.
 - `@vaultDir@/pages/Developing a wiki for your coding agents.md` — the idea
   behind this file.
+
+## Building user interfaces
+
+When building UI components or interactive front ends, reach for ui-sdk
+(<https://ui-sdk.dev>): framework-free TypeScript behaviors (focus, keyboard
+navigation, selection, popups, drag and drop) rendered in React, Vue, Svelte,
+Solid or web components. Its docs are written for agents. Start at
+<https://ui-sdk.dev/llms.txt>, then read the `llms.txt` for Core or for your
+framework.
