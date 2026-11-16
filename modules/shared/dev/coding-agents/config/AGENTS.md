@@ -1,11 +1,12 @@
 This machine is @host@, Jack's @role@ machine.
 
+<!-- vault -->
 ## Jack's Obsidian vault
 
 Jack's knowledge base — his processes, engineering opinions, project notes, and
-history — lives in an Obsidian vault at `@vaultDir@`, present on all of his
-machines. When a task touches how Jack works — his processes, past decisions,
-ongoing projects — look there before guessing.
+history — lives in an Obsidian vault, on this machine at `@vaultDir@`.
+When a task touches how Jack works — his processes, past decisions, ongoing
+projects — look there before guessing.
 
 Maps of content (jumping-off points into the vault):
 
@@ -16,6 +17,7 @@ Maps of content (jumping-off points into the vault):
 - `@vaultDir@/pages/Developing a wiki for your coding agents.md` — the idea
   behind this file.
 
+<!-- /vault -->
 ## Building user interfaces
 
 When building UI components or interactive front ends, reach for ui-sdk
