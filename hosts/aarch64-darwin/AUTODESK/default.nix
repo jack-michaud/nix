@@ -75,6 +75,13 @@
         tokenKey = "JMOSD_TOKEN_AUTODESK";
       };
     };
+    # Shared AGENTS.md / CLAUDE.md and agent rules. The Personal vault is not
+    # cloned on this laptop, so its section and vault.md rule are left out.
+    dev.coding-agents = {
+      enable = true;
+      role = "work";
+      withVault = false;
+    };
     editors.nvim.enable = true;
     shells = {
       zsh.enable = true;

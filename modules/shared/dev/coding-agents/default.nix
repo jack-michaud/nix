@@ -15,9 +15,14 @@ let
     --subst-var-by dotfilesDir ${escapeShellArg config.dotfiles.dir}'';
 
   # @var@ markers in AGENTS.md are substituted at build time so per-host facts
-  # (vault path, role) sit inline in the deployed file.
+  # (vault path, role) sit inline in the deployed file. The vault section sits
+  # between <!-- vault --> and <!-- /vault --> lines: without a vault the whole
+  # block is dropped, otherwise only the marker lines are.
   agentsMd = pkgs.runCommandLocal "AGENTS.md" { } ''
-    substitute ${./config/AGENTS.md} $out ${substVars}
+    substitute ${./config/AGENTS.md} AGENTS.md ${substVars}
+    ${if cfg.withVault
+      then "grep -v -x -e '<!-- vault -->' -e '<!-- /vault -->'"
+      else "sed '\\#^<!-- vault -->$#,\\#^<!-- /vault -->$#d'"} AGENTS.md > $out
   '';
 
   # Defines one agent rule: a markdown file in config/rules/ fanned out to
@@ -70,9 +75,10 @@ let
   dcodeExtensionNames = attrNames
     (filterAttrs (_: type: type == "directory") (builtins.readDir ./config/dcode-extensions));
 
-  rules = {
+  rules = optionalAttrs cfg.withVault {
     # Substituted so the `paths` trigger globs carry the real vault path.
     "vault.md" = { substitute = true; };
+  } // {
     "agentsmd-rules.md" = { substitute = true; };
     # Substituted so the body names the real checkout path.
     "editing-agent-rules.md" = { substitute = true; };
@@ -137,6 +143,9 @@ in {
     enable = mkBoolOpt false;
     # Conditions what agents are told about this machine: "personal" | "work".
     role = mkOpt types.str "personal";
+    # Whether this machine has the vault. Off drops the vault section from
+    # AGENTS.md and the vault.md rule, so agents are not sent to a missing path.
+    withVault = mkBoolOpt true;
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
     # Pi reconciles these sources on startup, just like the existing compaction
