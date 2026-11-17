@@ -26,3 +26,13 @@ navigation, selection, popups, drag and drop) rendered in React, Vue, Svelte,
 Solid or web components. Its docs are written for agents. Start at
 <https://ui-sdk.dev/llms.txt>, then read the `llms.txt` for Core or for your
 framework.
+
+<!-- maintainx -->
+## Git branch names at MaintainX
+
+In MaintainX repos, name branches `flastname/XXX-1234-what-youre-fixing`:
+first initial plus last name (Jack's is `jmichaud`), then the Linear ticket
+key (team prefix and number, e.g. `ABC-1234`), then a short kebab-case
+description of the change. Example: `jmichaud/ABC-1234-fix-wo-sort-order`.
+If you don't know the ticket, ask rather than inventing a key.
+<!-- /maintainx -->
