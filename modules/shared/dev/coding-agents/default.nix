@@ -15,14 +15,19 @@ let
     --subst-var-by dotfilesDir ${escapeShellArg config.dotfiles.dir}'';
 
   # @var@ markers in AGENTS.md are substituted at build time so per-host facts
-  # (vault path, role) sit inline in the deployed file. The vault section sits
-  # between <!-- vault --> and <!-- /vault --> lines: without a vault the whole
-  # block is dropped, otherwise only the marker lines are.
+  # (vault path, role) sit inline in the deployed file. Optional sections sit
+  # between <!-- name --> and <!-- /name --> lines (vault, maintainx): when the
+  # section is off the whole block is dropped, otherwise only the marker lines.
+  # The gates run one after the other, each reading the previous one's output.
+  gateSection = name: on: src: out: ''
+    ${if on
+      then "grep -v -x -e '<!-- ${name} -->' -e '<!-- /${name} -->'"
+      else "sed '\\#^<!-- ${name} -->$#,\\#^<!-- /${name} -->$#d'"} ${src} > ${out}
+  '';
   agentsMd = pkgs.runCommandLocal "AGENTS.md" { } ''
     substitute ${./config/AGENTS.md} AGENTS.md ${substVars}
-    ${if cfg.withVault
-      then "grep -v -x -e '<!-- vault -->' -e '<!-- /vault -->'"
-      else "sed '\\#^<!-- vault -->$#,\\#^<!-- /vault -->$#d'"} AGENTS.md > $out
+    ${gateSection "vault" cfg.withVault "AGENTS.md" "AGENTS.vault.md"}
+    ${gateSection "maintainx" cfg.withMaintainx "AGENTS.vault.md" "$out"}
   '';
 
   # Defines one agent rule: a markdown file in config/rules/ fanned out to
@@ -146,6 +151,9 @@ in {
     # Whether this machine has the vault. Off drops the vault section from
     # AGENTS.md and the vault.md rule, so agents are not sent to a missing path.
     withVault = mkBoolOpt true;
+    # Whether agents are told MaintainX conventions (branch naming). Off drops
+    # the maintainx section from AGENTS.md; only the work laptop turns it on.
+    withMaintainx = mkBoolOpt false;
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
     # Pi reconciles these sources on startup, just like the existing compaction

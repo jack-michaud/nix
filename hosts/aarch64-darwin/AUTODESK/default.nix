@@ -76,10 +76,12 @@
   modules = {
     # Apple clang must win for `cc`/`gcc` (e.g. native Ruby gems), so no Nix gcc.
     dev.nixGcc.enable = false;
-    # jmos as a client of the jmosd on DAMOCLES, To Do's only. The token is
-    # this machine's secret JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`).
+    # jmos as a client of the jmosd on DAMOCLES, To Do's only. The client is
+    # disabled on this host (enable = false); the server settings below apply
+    # if it is turned back on. The token is this machine's secret
+    # JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`).
     desktop.apps.jmos = {
-      enable = true;
+      enable = false;
       server = {
         # The house network name, not the tailnet one the task first named
         # (damocles.bison-draconis.ts.net): Jack asked for this in the
@@ -92,10 +94,12 @@
     };
     # Shared AGENTS.md / CLAUDE.md and agent rules. The Personal vault is not
     # cloned on this laptop, so its section and vault.md rule are left out.
+    # This is the MaintainX laptop, so it also gets the MaintainX rules.
     dev.coding-agents = {
       enable = true;
       role = "work";
       withVault = false;
+      withMaintainx = true;
     };
     editors.nvim.enable = true;
     shells = {
