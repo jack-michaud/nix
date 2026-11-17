@@ -3,7 +3,13 @@ jmos window against a real, throwaway `jmos jmosd`.
 
 Run on the machine the config names as its server (DAMOCLES for AUTODESK),
 because the config is used byte for byte: the window connects to the host
-and port written in it. The server here is a temporary one with its own data
+and port written in it. Anywhere else, pass `--loopback`: the temporary
+server listens on 127.0.0.1 and the window gets a copy of the config with
+only that host changed.
+
+The config may name several servers (AUTODESK also has a local jmosd). The
+test drives the one reached over TCP, and expects the main menu the default
+workspace lists. The server here is a temporary one with its own data
 folder, socket and token; the real jmosd, its database and the vault are
 never touched. The port must be free (the real jmosd does not listen on TCP
 until it is set up for this).
@@ -11,14 +17,15 @@ until it is set up for this).
     nix build --no-link --print-out-paths \
       '.#darwinConfigurations.AUTODESK.config.home-manager.users.michauj.home.file.".config/jmos/1.0/config.toml".source'
     PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=~/Code/github.com/jack-michaud/os/tests \
-      python3 tests/jmos_client_e2e.py --config /nix/store/...-jmos-config.toml
+      python3 tests/jmos_client_e2e.py --config /nix/store/...-jmos-config.toml [--loopback]
 
-jmos 2.0.0 (source read at 9cd3dcd) fails this test at "[CONNECTED]": its edge sends the
+jmos 2.0.0 (source read at 9cd3dcd) failed this test at the connection: its edge sent the
 config's `${KEY}` text itself as the token instead of the secret (src/edge.rs,
-`hello["token"]`; only the probe in src/server_owns.rs resolves it). Until
-that is fixed in jmos, `--raw-reference-token` gives the temporary server the
-reference text as its token, so everything after the token is still driven.
-Never set a real server up that way: that text is in this repo, not a secret.
+`hello["token"]`; only the probe in src/server_owns.rs resolved it). jmos 2.1.0
+passes without any flag. For a 2.0.0 binary, `--raw-reference-token` gives the
+temporary server the reference text as its token, so everything after the
+token is still driven. Never set a real server up that way: that text is in
+this repo, not a secret.
 
 Run it through `av inject +KEY -- python3 …` (KEY as the config names it) to
 use the vault's secret for both the temporary server and the window.
@@ -33,6 +40,7 @@ import os
 import re
 import shutil
 import socket
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -42,6 +50,32 @@ from pathlib import Path
 from harness.two_ui import WaitTimeout, Window
 
 TOKEN = "e2e-token-not-a-real-secret"
+
+# How the main menu names each entry the config can list (src/apps/mod.rs).
+MENU_LABELS = {"todos": "TODO LIST", "agents": "AGENT DASHBOARD", "forge": "PROMPT FORGE"}
+# jmos 2.1.0 puts this row in the menu whatever the workspace lists.
+BUILT_IN_ROWS = {"IDLE SCREEN"}
+
+
+def away_servers(screen):
+    """The servers the header says it cannot reach: `[SERVER AWAY · a, b]`.
+    None when the header lists none (`[CONNECTED]` when it reaches all)."""
+    found = re.search(r"\[SERVER AWAY · ([^\]]*)\]", screen)
+    return [n.strip() for n in found.group(1).split(",")] if found else None
+
+
+def wait_connected(win, name, timeout=15.0):
+    """Wait until the header no longer lists server `name` as away. Not
+    "[CONNECTED]": a config with a local jmosd also names a server that cannot
+    exist under the test's temporary HOME, so that one stays away."""
+    deadline = time.monotonic() + timeout
+    while True:
+        win.pump(0.05)
+        screen = win.text()
+        away = away_servers(screen)
+        if "[CONNECTED]" in screen or (away is not None and name not in away):
+            return
+        assert time.monotonic() < deadline, f"[servers.{name}] still away after {timeout:.0f}s:\n{screen}"
 
 
 def env_for(home):
@@ -93,19 +127,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path, help="the built jmos-config.toml")
     parser.add_argument("--binary", type=Path, default=Path(shutil.which("jmos") or "jmos"))
+    parser.add_argument("--loopback", action="store_true",
+                        help="listen on 127.0.0.1 and give the window a copy of the config with that host")
     parser.add_argument("--raw-reference-token", action="store_true",
                         help="the server accepts the unresolved ${KEY} text (jmos 2.0.0's edge sends that)")
     args = parser.parse_args()
 
     text = args.config.read_text()
     config = tomllib.loads(text)
-    (name, server), = config["servers"].items()
+    remote = {n: s for n, s in config["servers"].items() if s["url"].startswith("tcp://")}
+    assert len(remote) == 1, f"expected one tcp:// server, found {sorted(remote)}"
+    (name, server), = remote.items()
     key = re.fullmatch(r"\$\{([A-Z0-9_]+)\}", server["token"])
     assert key, f"token must be a ${{KEY}} reference, got {server['token']!r}"
     key = key.group(1)
-    assert server["url"].startswith("tcp://")
     address = server["url"][len("tcp://"):]
     host, port = address.rsplit(":", 1)
+    if args.loopback:
+        text = text.replace(f"tcp://{address}", f"tcp://127.0.0.1:{port}")
+        address = f"127.0.0.1:{port}"
+        host = "127.0.0.1"
     listen = f"{socket.gethostbyname(host)}:{port}"
     # The secret the config names, when the caller supplies it (`av inject
     # +KEY -- python3 …`); else a made-up one. Never printed.
@@ -114,6 +155,10 @@ def main():
 
     root = Path(tempfile.mkdtemp(prefix="jn-", dir="/tmp"))
     windows, proc = [], None
+    config_file = args.config.resolve()
+    if args.loopback:
+        config_file = root / "config.toml"
+        config_file.write_text(text)
     try:
         # --- the throwaway server, as DAMOCLES's jmosd.toml would be set ---
         srv = root / "s"
@@ -121,18 +166,34 @@ def main():
         (srv / "jmosd.toml").write_text(
             f'[server]\nlisten = ["tcp:{listen}"]\n'
             f'[auth]\ntokens = {{ autodesk = "${{{key}}}" }}\n')
-        proc = subprocess.Popen(
-            [str(args.binary), "jmosd", "--socket", str(srv / "sock"), "--data-dir", str(srv / "data"),
-             "--settings", str(srv / "jmosd.toml"), "--space", server["space"]],
-            stderr=subprocess.PIPE, env={**env_for(srv), key: secret})
-        deadline = time.time() + 10
-        while True:
-            try:
-                socket.create_connection(tuple(listen.split(":")), timeout=0.5).close()
-                break
-            except OSError:
-                assert time.time() < deadline and proc.poll() is None, "jmosd did not listen"
-                time.sleep(0.05)
+
+        def launch():
+            started = subprocess.Popen(
+                [str(args.binary), "jmosd", "--socket", str(srv / "sock"), "--data-dir", str(srv / "data"),
+                 "--settings", str(srv / "jmosd.toml"), "--space", server["space"]],
+                stderr=subprocess.PIPE, env={**env_for(srv), key: secret})
+            deadline = time.time() + 10
+            while True:
+                try:
+                    socket.create_connection(tuple(listen.split(":")), timeout=0.5).close()
+                    return started
+                except OSError:
+                    assert time.time() < deadline and started.poll() is None, "jmosd did not listen"
+                    time.sleep(0.05)
+
+        proc = launch()
+        # A server entry may pin the server it must reach (`uuid`), and the
+        # window refuses any other. A new jmosd makes its own uuid on first
+        # start and keeps it in its database, so give it the pinned one.
+        if server.get("uuid"):
+            proc.terminate()
+            proc.wait(5)
+            proc.stderr.close()
+            db = sqlite3.connect(srv / "data" / "authoritative.sqlite3")
+            with db:
+                db.execute("UPDATE jmosd_meta SET value = ? WHERE key = 'uuid'", (server["uuid"],))
+            db.close()
+            proc = launch()
         print(f"server: temporary jmosd listening on tcp:{listen}")
 
         assert Writer(address, server["space"], "wrong").first() is None, "wrong token was let in"
@@ -147,7 +208,7 @@ def main():
             home = root / label
             path = home / ".config/jmos/1.0/config.toml"
             path.parent.mkdir(parents=True)
-            path.symlink_to(args.config.resolve())
+            path.symlink_to(config_file)
             env = {**env_for(home), "JMOS_CONFIG": str(path), "TERM": "xterm-256color"}
             if token is not None:
                 env[key] = token
@@ -170,9 +231,13 @@ def main():
         print("---- main menu ----\n" + menu + "\n-------------------")
         # A menu row: an optional cursor, the key, the entry's name in capitals.
         names = re.findall(r"^ >? +\S {2,}([A-Z][A-Z' ]*[A-Z]) {2,}", menu, re.M)
-        assert names == ["TODO LIST", "QUIT"], f"main menu entries: {names}"
-        print("window: the main menu is the todo list and quit, nothing else")
-        win.peek_for("[CONNECTED]")
+        workspace = next(w for w in config["workspaces"].values() if w.get("default"))
+        assert workspace["rest"] is False, "with rest on, the menu holds more than the config lists"
+        want = [MENU_LABELS[slug] for slug in workspace["menu"]] + ["QUIT"]
+        shown = [n for n in names if n not in BUILT_IN_ROWS]
+        assert shown == want, f"main menu entries: {names}, wanted {want}"
+        print(f"window: the main menu is {', '.join(want[:-1])} and quit, nothing else")
+        wait_connected(win, name)
         win.send("t", settle=1.0)
         win.peek_for("Milk from the server")
         print("window: the server's todo shows in To Do's")
@@ -195,7 +260,7 @@ def main():
             screen = bad.text()
             print(f"---- token: {label} ----\n" + screen + "\n---------------------")
             assert "Milk from the server" not in screen, f"token {label}: the server's todos were read"
-            assert "[CONNECTED]" not in screen, f"token {label}: the window says connected"
+            assert name in (away_servers(screen) or []), f"token {label}: [servers.{name}] is not shown away"
         print("PASS (the server took the unresolved reference text as the token)"
               if args.raw_reference_token else "PASS")
     finally:
