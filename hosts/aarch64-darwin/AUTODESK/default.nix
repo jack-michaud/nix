@@ -20,6 +20,12 @@
   environment.etc."paths.d/10-nix-determinate".text =
     "/nix/var/nix/profiles/default/bin";
 
+  # ~/.cargo/bin holds `cargo install`ed tools (jmos). Same two routes as
+  # above: paths.d for path_helper (login shells, Cursor), and systemPath
+  # for nix-darwin's /etc/zshenv, which non-interactive shells do read.
+  environment.etc."paths.d/20-cargo".text = "/Users/${user}/.cargo/bin";
+  environment.systemPath = [ "/Users/${user}/.cargo/bin" ];
+
   # `darwin-rebuild` runs Home Manager via `sudo -u`, which uses secure_path
   # and drops Determinate's nix. Keep nix on sudo PATH, and also bake a
   # nix-build into HM activation so the sanity check does not depend on sudo.
