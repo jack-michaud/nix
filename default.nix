@@ -66,7 +66,6 @@ with lib.my;
     ripgrep
     ranger
     nodejs
-    gcc
     htop
   ];
 } // (if isDarwin then {

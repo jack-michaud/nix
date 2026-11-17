@@ -6,3 +6,8 @@ if [[ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
   unset __ETC_PROFILE_NIX_SOURCED
   . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 fi
+
+# Podman Desktop's CLI (podman, docker shim). Appended so Nix and /usr/bin win.
+if [[ -d /opt/podman/bin ]]; then
+  path+=(/opt/podman/bin)
+fi
