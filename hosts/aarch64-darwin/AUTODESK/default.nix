@@ -78,17 +78,15 @@
     dev.nixGcc.enable = false;
     # jmos client config, as it is on this machine (./jmos-config.toml): a
     # local jmosd ("home") plus the jmosd on DAMOCLES ("personal"), whose To
-    # Do's the primary workspace shows. The client is disabled on this host
-    # (enable = false); the file applies as is if it is turned back on. The
-    # token is this machine's secret JMOSD_TOKEN_AUTODESK (~/.zshrc.local or
-    # `av`); the file only holds the `${KEY}` reference. DAMOCLES.house is
-    # the house network name, not the tailnet one
-    # (damocles.bison-draconis.ts.net), chosen by Jack on 2026-11-11. jmosd's
-    # TCP has no TLS, so on that path the token and the replicated data are
-    # not encrypted, and the personal server is only reachable while on the
-    # house network.
+    # Do's the primary workspace shows. The token is this machine's secret
+    # JMOSD_TOKEN_AUTODESK (~/.zshrc.local or `av`); the file only holds the
+    # `${KEY}` reference. DAMOCLES.house is the house network name, not the
+    # tailnet one (damocles.bison-draconis.ts.net), chosen by Jack on
+    # 2026-11-11. jmosd's TCP has no TLS, so on that path the token and the
+    # replicated data are not encrypted, and the personal server is only
+    # reachable while on the house network.
     desktop.apps.jmos = {
-      enable = false;
+      enable = true;
       configFile = ./jmos-config.toml;
     };
     # Shared AGENTS.md / CLAUDE.md and agent rules. The Personal vault is not
