@@ -16,8 +16,12 @@ let
 
   # @var@ markers in AGENTS.md are substituted at build time so per-host facts
   # (vault path, role) sit inline in the deployed file. Optional sections sit
-  # between <!-- name --> and <!-- /name --> lines (vault, maintainx): when the
-  # section is off the whole block is dropped, otherwise only the marker lines.
+  # between <!-- name --> and <!-- /name --> lines (vault, maintainx, local):
+  # when the section is off the whole block is dropped, otherwise only the
+  # marker lines are.
+  #   vault: the Obsidian vault section (withVault)
+  #   maintainx: MaintainX conventions (withMaintainx)
+  #   local: the pointer to ~/.agents/AGENTS.local.md (withLocal)
   # The gates run one after the other, each reading the previous one's output.
   gateSection = name: on: src: out: ''
     ${if on
@@ -27,7 +31,8 @@ let
   agentsMd = pkgs.runCommandLocal "AGENTS.md" { } ''
     substitute ${./config/AGENTS.md} AGENTS.md ${substVars}
     ${gateSection "vault" cfg.withVault "AGENTS.md" "AGENTS.vault.md"}
-    ${gateSection "maintainx" cfg.withMaintainx "AGENTS.vault.md" "$out"}
+    ${gateSection "maintainx" cfg.withMaintainx "AGENTS.vault.md" "AGENTS.maintainx.md"}
+    ${gateSection "local" cfg.withLocal "AGENTS.maintainx.md" "$out"}
   '';
 
   # Defines one agent rule: a markdown file in config/rules/ fanned out to
@@ -154,6 +159,9 @@ in {
     # Whether agents are told MaintainX conventions (branch naming). Off drops
     # the maintainx section from AGENTS.md; only the work laptop turns it on.
     withMaintainx = mkBoolOpt false;
+    # Whether agents are pointed at ~/.agents/AGENTS.local.md, a per-machine
+    # file that is never committed. Off drops that section from AGENTS.md.
+    withLocal = mkBoolOpt false;
     # The Obsidian vault the agents files point at.
     vaultDir = mkOpt types.str "${config.dotfiles.vaultDir}/Personal";
     # Pi reconciles these sources on startup, just like the existing compaction

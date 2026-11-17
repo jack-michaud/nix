@@ -37,6 +37,11 @@ in {
   options.modules.desktop.apps.jmos = with types; {
     enable = mkBoolOpt false;
 
+    # A hand-written client config used byte for byte instead of the one
+    # generated from `server` and `workspace` below (which are then ignored).
+    # For a machine whose client has more than one server or per-app routing.
+    configFile = mkOpt (nullOr path) null;
+
     # jmos has no git remote, so there is no flake input to build it from.
     # null: the module manages the config only and expects `jmos` on PATH
     # (e.g. `cargo install` into ~/.cargo/bin from a copy of the checkout).
@@ -65,7 +70,7 @@ in {
   };
 
   config = mkIf cfg.enable {
-    assertions = [
+    assertions = mkIf (cfg.configFile == null) [
       {
         assertion = cfg.server.host != "";
         message = "modules.desktop.apps.jmos.server.host must be set";
@@ -79,7 +84,8 @@ in {
 
     # A store file: jmos only reads it. Change the options and rebuild.
     home.file.".config/jmos/1.0/config.toml".source =
-      (pkgs.formats.toml { }).generate "jmos-config.toml" clientConfig;
+      if cfg.configFile != null then cfg.configFile
+      else (pkgs.formats.toml { }).generate "jmos-config.toml" clientConfig;
 
     # Without this jmos reads the pre-1.0 ~/.config/jmos/config.toml.
     env.JMOS_CONFIG = configPath;

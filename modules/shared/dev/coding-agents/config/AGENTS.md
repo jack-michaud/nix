@@ -36,3 +36,11 @@ key (team prefix and number, e.g. `ABC-1234`), then a short kebab-case
 description of the change. Example: `jmichaud/ABC-1234-fix-wo-sort-order`.
 If you don't know the ticket, ask rather than inventing a key.
 <!-- /maintainx -->
+
+<!-- local -->
+## Machine-local instructions
+
+Instructions that only apply to this machine and are not committed to this
+repo live in `~/.agents/AGENTS.local.md`. Read that file too:
+@~/.agents/AGENTS.local.md
+<!-- /local -->

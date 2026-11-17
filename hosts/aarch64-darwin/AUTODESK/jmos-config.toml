@@ -1,0 +1,36 @@
+appcore_path = "/Users/michauj/.local/share/jmos/appcore/12a0696"
+default_server = "home"
+
+[servers.home]
+url = "unix:~/.local/state/jmos/jmosd.sock"
+space = "home"
+uuid = "00f76a8c-6473-4dde-82cb-2c1169bfee38"
+
+[servers.personal]
+url = "tcp://DAMOCLES.house:7878"
+space = "home"
+token = "${JMOSD_TOKEN_AUTODESK}"
+uuid = "cd6d10b7-f2f0-4d5f-89d0-f6950fed238f"
+
+[edge]
+
+[jmosd]
+enabled = true
+
+[workspaces.primary]
+default = true
+menu = ["todos", "agents", "forge"]
+rest = false
+server = "home"
+title = "Primary"
+
+[workspaces.primary.apps]
+todos = "personal"
+forge = "home"
+agents = "home"
+
+[workspaces.personal]
+menu = ["todos"]
+rest = false
+server = "personal"
+title = "Personal"
