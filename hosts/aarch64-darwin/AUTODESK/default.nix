@@ -32,7 +32,14 @@
   security.sudo.extraConfig = ''
     Defaults secure_path="/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   '';
-  home-manager.users.${user}.home.extraActivationPath = [ pkgs.nix ];
+  home-manager.users.${user}.home = {
+    extraActivationPath = [ pkgs.nix ];
+
+    # MaintainX monorepo worktrees don't get the gitignored mise.local.toml
+    # that normally sets MX_SLUG, so export it globally. Reaches zsh via the
+    # hm-session-vars.sh that config/zshrc sources.
+    sessionVariables.MX_SLUG = "jackmichaud";
+  };
 
   # System-level tools for the MaintainX skill-share repo. Its mise.toml
   # installs the language toolchains (go, node, yarn, python, uv, shellcheck,
