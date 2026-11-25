@@ -53,7 +53,13 @@ from harness.two_ui import WaitTimeout, Window
 TOKEN = "e2e-token-not-a-real-secret"
 
 # How the main menu names each entry the config can list (src/apps/mod.rs).
-MENU_LABELS = {"todos": "TODO LIST", "agents": "AGENT DASHBOARD", "forge": "PROMPT FORGE"}
+MENU_LABELS = {
+    "todos": "TODO LIST",
+    "agents": "AGENT DASHBOARD",
+    "forge": "PROMPT FORGE",
+    "gmail": "MESSAGE INDEX",
+    "slack:maintainx": "SLACK · MAINTAINX",
+}
 # jmos 2.1.0 puts this row in the menu whatever the workspace lists.
 BUILT_IN_ROWS = {"IDLE SCREEN"}
 
@@ -231,7 +237,7 @@ def main():
         menu = win.text()
         print("---- main menu ----\n" + menu + "\n-------------------")
         # A menu row: an optional cursor, the key, the entry's name in capitals.
-        names = re.findall(r"^ >? +\S {2,}([A-Z][A-Z' ]*[A-Z]) {2,}", menu, re.M)
+        names = re.findall(r"^ >? +\S {2,}([A-Z][A-Z' ·]*[A-Z]) {2,}", menu, re.M)
         workspace = next(w for w in config["workspaces"].values() if w.get("default"))
         assert workspace["rest"] is False, "with rest on, the menu holds more than the config lists"
         want = [MENU_LABELS[slug] for slug in workspace["menu"]] + ["QUIT"]
