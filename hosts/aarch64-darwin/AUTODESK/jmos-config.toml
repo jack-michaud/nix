@@ -19,10 +19,12 @@ enabled = true
 
 [workspaces.primary]
 default = true
-menu = ["todos", "agents", "forge"]
+menu = ["todos", "agents", "forge", "gmail", "slack:maintainx"]
 rest = false
 server = "home"
 title = "Primary"
+
+[workspaces.primary.slack.maintainx]
 
 [workspaces.primary.apps]
 todos = "personal"
